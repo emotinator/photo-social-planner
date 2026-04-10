@@ -1,18 +1,21 @@
-import { activeTab, currentImages, editCaption, editTitle, editHashtags, previewIndex } from '../../store'
+import { activeTab, currentImages, editCaption, editTitle, editHashtags, previewIndex, assembledPost, selectedTemplateId } from '../../store'
 import { InstagramPreview } from '../preview/InstagramPreview'
 
 export function Canvas() {
   const tab = activeTab.value
   const images = currentImages.value
-  const hasContent = editCaption.value || editTitle.value
+  const isTemplateMode = !!selectedTemplateId.value
+  const hasContent = isTemplateMode ? !!assembledPost.value : (editCaption.value || editTitle.value)
 
   if (tab === 'preview' || (tab === 'generate' && hasContent)) {
+    const caption = isTemplateMode ? assembledPost.value : editCaption.value
+    const hashtags = isTemplateMode ? [] : editHashtags.value
     return (
       <div class="canvas-area">
         <InstagramPreview
           images={images}
-          caption={editCaption.value}
-          hashtags={editHashtags.value}
+          caption={caption}
+          hashtags={hashtags}
           username="photographer"
           selectedIndex={previewIndex.value}
           onIndexChange={(i) => { previewIndex.value = i }}

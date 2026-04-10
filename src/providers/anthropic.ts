@@ -83,25 +83,37 @@ export const anthropicProvider: LLMProvider = {
         system: req.systemPrompt,
         messages: [{ role: 'user', content }],
         tools: [
-          {
-            name: 'social_post',
-            description: 'Generate a social media post draft',
-            input_schema: {
-              type: 'object',
-              properties: {
-                title: { type: 'string', description: 'A compelling title for the post' },
-                caption: { type: 'string', description: 'The full caption text for the social media post' },
-                hashtags: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Relevant hashtags without the # symbol',
+          req.templateLLMFields
+            ? {
+                name: 'template_fill',
+                description: 'Fill template placeholders for a social media post',
+                input_schema: {
+                  type: 'object',
+                  properties: Object.fromEntries(
+                    req.templateLLMFields.map((f) => [f.key, { type: 'string', description: `Value for the "${f.key}" placeholder` }])
+                  ),
+                  required: req.templateLLMFields.map((f) => f.key),
+                },
+              }
+            : {
+                name: 'social_post',
+                description: 'Generate a social media post draft',
+                input_schema: {
+                  type: 'object',
+                  properties: {
+                    title: { type: 'string', description: 'A compelling title for the post' },
+                    caption: { type: 'string', description: 'The full caption text for the social media post' },
+                    hashtags: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description: 'Relevant hashtags without the # symbol',
+                    },
+                  },
+                  required: ['title', 'caption', 'hashtags'],
                 },
               },
-              required: ['title', 'caption', 'hashtags'],
-            },
-          },
         ],
-        tool_choice: { type: 'tool', name: 'social_post' },
+        tool_choice: { type: 'tool', name: req.templateLLMFields ? 'template_fill' : 'social_post' },
       }),
     })
 
@@ -116,6 +128,17 @@ export const anthropicProvider: LLMProvider = {
     // Extract tool use result
     const toolUse = data.content?.find((c: any) => c.type === 'tool_use')
     if (toolUse?.input) {
+      // Template mode: return all fills as llmFills
+      if (req.templateLLMFields) {
+        return {
+          title: '',
+          caption: '',
+          hashtags: [],
+          templateFields: {},
+          llmFills: toolUse.input as Record<string, string>,
+          raw,
+        }
+      }
       return {
         title: toolUse.input.title || '',
         caption: toolUse.input.caption || '',

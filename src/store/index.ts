@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals'
-import type { Draft, DraftImage, ProviderConfig, PlatformId, GenerateResponse } from '../types'
+import type { Draft, DraftImage, ProviderConfig, PlatformId, GenerateResponse, PostTemplate, SnippetSet, CaptionVoice } from '../types'
 
-export type TabId = 'images' | 'generate' | 'preview' | 'plan' | 'settings'
+export type TabId = 'images' | 'generate' | 'templates' | 'preview' | 'deliver' | 'plan' | 'settings'
 
 // UI state
 export const activeTab = signal<TabId>('images')
@@ -39,6 +39,19 @@ export const generationResult = signal<GenerateResponse | null>(null)
 export const editTitle = signal('')
 export const editCaption = signal('')
 export const editHashtags = signal<string[]>([])
+
+// Template state
+export const allTemplates = signal<PostTemplate[]>([])
+export const allSnippetSets = signal<SnippetSet[]>([])
+export const selectedTemplateId = signal<string | null>(null) // null = classic mode
+export const snippetSelections = signal<Record<string, string>>({})
+export const assembledPost = signal('')
+
+// Caption voice state
+export const allCaptionVoices = signal<CaptionVoice[]>([])
+export const selectedVoiceIds = signal<string[]>([])   // multi-select
+export const voiceVariants = signal<Record<string, string>>({})  // voiceId -> generated caption
+export const chosenVoiceId = signal<string | null>(null)  // which variant user picked
 
 // Provider state
 export const selectedProvider = signal('ollama')

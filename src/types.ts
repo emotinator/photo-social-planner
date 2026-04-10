@@ -75,6 +75,14 @@ export interface TemplateResolution {
   llmFills: Record<string, string>           // placeholder key → generated text
 }
 
+export interface CaptionVoice {
+  id: string
+  name: string              // "Warm & Reflective", "Punchy & Edgy"
+  description: string       // detailed prompt descriptor for the LLM
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ParsedPlaceholder {
   raw: string           // e.g. "[LLM Caption]"
   type: 'llm' | 'user'
@@ -125,7 +133,7 @@ export interface PlatformConfig {
 }
 
 export const PLATFORMS: Record<PlatformId, PlatformConfig> = {
-  instagram: { id: 'instagram', name: 'Instagram', captionMaxLength: 2200, hashtagLimit: 30 },
+  instagram: { id: 'instagram', name: 'Instagram', captionMaxLength: 2200, hashtagLimit: 5 },
   threads: { id: 'threads', name: 'Threads', captionMaxLength: 500, hashtagLimit: 0 },
   linkedin: { id: 'linkedin', name: 'LinkedIn', captionMaxLength: 3000, hashtagLimit: 5 },
   facebook: { id: 'facebook', name: 'Facebook', captionMaxLength: 63206, hashtagLimit: 30 },

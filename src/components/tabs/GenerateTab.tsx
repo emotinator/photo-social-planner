@@ -5,11 +5,16 @@ import {
   isGenerating, generationError, generationResult,
   editTitle, editCaption, editHashtags,
   activeTab, showToast,
+  allTemplates, allSnippetSets, selectedTemplateId,
+  snippetSelections, assembledPost,
+  allCaptionVoices, selectedVoiceIds, voiceVariants, chosenVoiceId,
 } from '../../store'
 import { getProvider, getAllProviders } from '../../providers/registry'
-import { resizeForLLM } from '../../store/storage'
-import { buildSystemPrompt, buildUserPrompt } from '../../utils/prompts'
-import { useState } from 'preact/hooks'
+import { resizeForLLM, loadAllCaptionVoices } from '../../store/storage'
+import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt } from '../../utils/prompts'
+import { extractLLMFields, extractUserFields, assembleTemplate } from '../../utils/templateParser'
+import { useState, useEffect as useEffectAlias } from 'preact/hooks'
+import type { PostTemplate, SnippetSet, CaptionVoice } from '../../types'
 
 export function GenerateTab() {
   const provider = selectedProvider.value
@@ -20,13 +25,29 @@ export function GenerateTab() {
   const error = generationError.value
   const [newHashtag, setNewHashtag] = useState('')
 
+  const templates = allTemplates.value
+  const snippetSets = allSnippetSets.value
+  const templateId = selectedTemplateId.value
+  const activeTemplate = templateId ? templates.find((t: PostTemplate) => t.id === templateId) : null
+  const userFields = activeTemplate ? extractUserFields(activeTemplate.body) : []
+  const isTemplateMode = !!activeTemplate
+
+  const voices = allCaptionVoices.value
+  const selVoiceIds = selectedVoiceIds.value
+  const variants = voiceVariants.value
+  const pickedVoice = chosenVoiceId.value
+
+  // Load voices on mount
+  useEffectAlias(() => {
+    loadAllCaptionVoices().then((v) => { allCaptionVoices.value = v })
+  }, [])
+
   // Load models when provider changes
   useEffect(() => {
     const p = getProvider(provider)
     if (!p) return
     p.listModels().then((m) => {
       availableModels.value = m.map((x) => ({ id: x.id, name: x.name }))
-      // Auto-select first model or default
       if (m.length > 0 && !m.find((x) => x.id === selectedModel.value)) {
         selectedModel.value = m[0].id
       }
@@ -47,36 +68,94 @@ export function GenerateTab() {
 
     isGenerating.value = true
     generationError.value = null
+    voiceVariants.value = {}
+    chosenVoiceId.value = null
 
     try {
-      // Resize images for LLM
       const resized = await Promise.all(images.map((img: { blob: Blob }) => resizeForLLM(img.blob)))
-
       const platform = currentPlatform.value
-      const systemPrompt = buildSystemPrompt(platform)
       const userPrompt = buildUserPrompt(currentNotes.value, images.length)
 
-      const result = await p.generate({
-        model,
-        images: resized,
-        systemPrompt,
-        userPrompt,
-        platform,
-      })
+      // Determine which voices to generate for
+      const activeVoices = selVoiceIds
+        .map((id: string) => voices.find((v: CaptionVoice) => v.id === id))
+        .filter(Boolean) as CaptionVoice[]
+      const hasMultipleVoices = activeVoices.length > 1
 
-      generationResult.value = result
-      editTitle.value = result.title
-      editCaption.value = result.caption
-      editHashtags.value = result.hashtags
+      if (isTemplateMode && activeTemplate) {
+        // Template mode
+        const llmFieldKeys = extractLLMFields(activeTemplate.body)
+        const llmFields = llmFieldKeys.map((key) => ({ key }))
 
-      showToast('Draft generated!', 'success')
+        if (hasMultipleVoices) {
+          // Generate one variant per voice
+          const newVariants: Record<string, string> = {}
+          for (const voice of activeVoices) {
+            const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voice.description)
+            const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields })
+            const fills = result.llmFills || {}
+            newVariants[voice.id] = assembleTemplate(activeTemplate.body, fills, snippetSelections.value)
+          }
+          voiceVariants.value = newVariants
+          // Auto-select the first
+          const firstId = activeVoices[0].id
+          chosenVoiceId.value = firstId
+          assembledPost.value = newVariants[firstId]
+          generationResult.value = null
+        } else {
+          // Single voice or no voice
+          const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined
+          const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voiceDesc)
+          const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields })
+          generationResult.value = result
+          const fills = result.llmFills || {}
+          assembledPost.value = assembleTemplate(activeTemplate.body, fills, snippetSelections.value)
+        }
+
+        editTitle.value = ''
+        editCaption.value = ''
+        editHashtags.value = []
+      } else {
+        // Classic mode
+        if (hasMultipleVoices) {
+          // Generate variant per voice — store caption variants
+          const newVariants: Record<string, string> = {}
+          let lastResult = null
+          for (const voice of activeVoices) {
+            const systemPrompt = buildSystemPrompt(platform, voice.description)
+            const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform })
+            newVariants[voice.id] = result.caption
+            lastResult = result
+          }
+          voiceVariants.value = newVariants
+          const firstId = activeVoices[0].id
+          chosenVoiceId.value = firstId
+          editCaption.value = newVariants[firstId]
+          editTitle.value = lastResult?.title || ''
+          editHashtags.value = lastResult?.hashtags || []
+          generationResult.value = lastResult
+          assembledPost.value = ''
+        } else {
+          const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined
+          const systemPrompt = buildSystemPrompt(platform, voiceDesc)
+          const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform })
+          generationResult.value = result
+          editTitle.value = result.title
+          editCaption.value = result.caption
+          editHashtags.value = result.hashtags
+          assembledPost.value = ''
+        }
+      }
+
+      const voiceCount = activeVoices.length
+      showToast(voiceCount > 1 ? `Generated ${voiceCount} voice variants!` : 'Draft generated!', 'success')
     } catch (e: any) {
       generationError.value = e.message || 'Generation failed'
       showToast(e.message || 'Generation failed', 'error')
     } finally {
       isGenerating.value = false
     }
-  }, [provider, model, images])
+  }, [provider, model, images, isTemplateMode, activeTemplate, selVoiceIds, voices])
 
   const addHashtag = () => {
     const tag = newHashtag.trim().replace(/^#/, '')
@@ -129,7 +208,105 @@ export function GenerateTab() {
             <option value="linkedin" disabled>LinkedIn (coming soon)</option>
           </select>
         </div>
+
+        <div class="field-row">
+          <div class="field-label">Template</div>
+          <select
+            value={templateId || ''}
+            onChange={(e) => {
+              const val = (e.target as HTMLSelectElement).value
+              selectedTemplateId.value = val || null
+              snippetSelections.value = {}
+              assembledPost.value = ''
+            }}
+          >
+            <option value="">None (classic mode)</option>
+            {templates.map((t: PostTemplate) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        </div>
       </div>
+
+      {/* Voice selector (multi-select) */}
+      {voices.length > 0 && (
+        <div class="section">
+          <div class="section-label">Caption Voice</div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginBottom: '8px' }}>
+            Select one or more. Multiple = generate a variant per voice.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {voices.map((v: CaptionVoice) => {
+              const isSelected = selVoiceIds.includes(v.id)
+              return (
+                <label
+                  key={v.id}
+                  class={`template-list-item`}
+                  style={{
+                    cursor: 'pointer', marginBottom: 0,
+                    borderColor: isSelected ? 'var(--accent)' : undefined,
+                    background: isSelected ? 'var(--accent-dim)' : undefined,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => {
+                      if (isSelected) {
+                        selectedVoiceIds.value = selVoiceIds.filter((id: string) => id !== v.id)
+                      } else {
+                        selectedVoiceIds.value = [...selVoiceIds, v.id]
+                      }
+                    }}
+                    style={{ accentColor: 'var(--accent)', marginRight: '6px' }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>{v.name}</div>
+                    <div style={{ fontSize: '10px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginTop: '1px', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {v.description}
+                    </div>
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Snippet selectors when template has [User ...] fields */}
+      {isTemplateMode && userFields.length > 0 && (
+        <div class="section">
+          <div class="section-label">Snippet Selections</div>
+          {userFields.map((fieldName) => {
+            const set = snippetSets.find((s: SnippetSet) => s.name === fieldName)
+            return (
+              <div key={fieldName} class="field-row">
+                <div class="field-label">{fieldName}</div>
+                {set ? (
+                  <select
+                    value={snippetSelections.value[fieldName] || ''}
+                    onChange={(e) => {
+                      snippetSelections.value = {
+                        ...snippetSelections.value,
+                        [fieldName]: (e.target as HTMLSelectElement).value,
+                      }
+                    }}
+                  >
+                    <option value="">Select...</option>
+                    {set.options.map((opt: string) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div style={{ fontSize: '11px', color: 'var(--red)', fontFamily: "'DM Mono', monospace" }}>
+                    No snippet set "{fieldName}" found. Create it in Templates tab.
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <div class="section">
         <button
@@ -157,7 +334,83 @@ export function GenerateTab() {
         )}
       </div>
 
-      {editCaption.value && (
+      {/* Voice variant picker */}
+      {Object.keys(variants).length > 1 && (
+        <div class="section">
+          <div class="section-label">Voice Variants</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {Object.entries(variants).map(([voiceId, text]) => {
+              const voice = voices.find((v: CaptionVoice) => v.id === voiceId)
+              const isChosen = pickedVoice === voiceId
+              return (
+                <div
+                  key={voiceId}
+                  class="template-list-item"
+                  style={{
+                    cursor: 'pointer',
+                    borderColor: isChosen ? 'var(--accent)' : undefined,
+                    background: isChosen ? 'var(--accent-dim)' : undefined,
+                  }}
+                  onClick={() => {
+                    chosenVoiceId.value = voiceId
+                    if (isTemplateMode) {
+                      assembledPost.value = text
+                    } else {
+                      editCaption.value = text
+                    }
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: isChosen ? 'var(--accent)' : 'var(--text)' }}>
+                      {voice?.name || 'Voice'}
+                      {isChosen && <span style={{ marginLeft: '6px', fontSize: '11px', color: 'var(--green)' }}>selected</span>}
+                    </div>
+                    <div style={{
+                      fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginTop: '3px',
+                      display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                      whiteSpace: 'pre-wrap',
+                    }}>
+                      {text}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Template mode: single assembled post textarea */}
+      {isTemplateMode && assembledPost.value && (
+        <>
+          <div class="section">
+            <div class="section-label">Assembled Post</div>
+            <div class="result-field">
+              <textarea
+                class="template-editor"
+                rows={14}
+                value={assembledPost.value}
+                onInput={(e) => (assembledPost.value = (e.target as HTMLTextAreaElement).value)}
+              />
+              <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", textAlign: 'right' }}>
+                {assembledPost.value.length} characters
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="btn-row">
+              <button class="btn btn-ghost btn-sm" onClick={() => (activeTab.value = 'preview')}>
+                <span class="material-symbols-outlined" style={{ fontSize: '14px' }}>visibility</span>
+                Preview
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Classic mode: title/caption/hashtags */}
+      {!isTemplateMode && editCaption.value && (
         <>
           <div class="section">
             <div class="section-label">Title</div>
@@ -210,10 +463,7 @@ export function GenerateTab() {
 
           <div class="section">
             <div class="btn-row">
-              <button
-                class="btn btn-ghost btn-sm"
-                onClick={() => (activeTab.value = 'preview')}
-              >
+              <button class="btn btn-ghost btn-sm" onClick={() => (activeTab.value = 'preview')}>
                 <span class="material-symbols-outlined" style={{ fontSize: '14px' }}>visibility</span>
                 Preview
               </button>

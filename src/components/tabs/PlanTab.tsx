@@ -4,6 +4,7 @@ import {
   editTitle, editCaption, editHashtags, generationResult,
   activeTab, showToast, editingDraftId,
   selectedProvider, selectedModel,
+  assembledPost, selectedTemplateId, snippetSelections,
 } from '../../store'
 import { saveDraft, loadAllDrafts, deleteDraft } from '../../store/storage'
 import type { Draft, DraftImage } from '../../types'
@@ -11,7 +12,7 @@ import type { Draft, DraftImage } from '../../types'
 export function PlanTab() {
   const drafts = savedDrafts.value
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({})
-  const hasContent = editCaption.value || editTitle.value || currentImages.value.length > 0
+  const hasContent = editCaption.value || editTitle.value || assembledPost.value || currentImages.value.length > 0
 
   // Load drafts on mount
   useEffect(() => {
@@ -36,12 +37,13 @@ export function PlanTab() {
 
   const handleSave = useCallback(async () => {
     const images = currentImages.value
-    if (images.length === 0 && !editCaption.value) {
+    if (images.length === 0 && !editCaption.value && !assembledPost.value) {
       showToast('Nothing to save', 'error')
       return
     }
 
     const now = new Date().toISOString()
+    const isTemplateMode = !!selectedTemplateId.value
     const draft: Draft = {
       id: editingDraftId.value || crypto.randomUUID(),
       createdAt: editingDraftId.value ? (drafts.find((d: Draft) => d.id === editingDraftId.value)?.createdAt || now) : now,
@@ -50,8 +52,8 @@ export function PlanTab() {
       platform: currentPlatform.value,
       images,
       title: editTitle.value,
-      caption: editCaption.value,
-      hashtags: editHashtags.value,
+      caption: isTemplateMode ? '' : editCaption.value,
+      hashtags: isTemplateMode ? [] : editHashtags.value,
       templateFields: {},
       notes: currentNotes.value,
       generatedWith: generationResult.value
@@ -59,6 +61,15 @@ export function PlanTab() {
             provider: selectedProvider.value,
             model: selectedModel.value,
             timestamp: now,
+          }
+        : undefined,
+      assembledPost: isTemplateMode ? assembledPost.value : undefined,
+      templateId: selectedTemplateId.value || undefined,
+      templateResolution: isTemplateMode && selectedTemplateId.value
+        ? {
+            templateId: selectedTemplateId.value,
+            snippetSelections: { ...snippetSelections.value },
+            llmFills: generationResult.value?.llmFills || {},
           }
         : undefined,
     }
@@ -84,6 +95,18 @@ export function PlanTab() {
     editCaption.value = draft.caption
     editHashtags.value = draft.hashtags
     editingDraftId.value = draft.id
+
+    // Restore template state
+    if (draft.templateId && draft.templateResolution) {
+      selectedTemplateId.value = draft.templateId
+      snippetSelections.value = draft.templateResolution.snippetSelections || {}
+      assembledPost.value = draft.assembledPost || ''
+    } else {
+      selectedTemplateId.value = null
+      snippetSelections.value = {}
+      assembledPost.value = ''
+    }
+
     activeTab.value = 'generate'
     showToast('Draft loaded', 'info')
   }
@@ -139,8 +162,8 @@ export function PlanTab() {
                   </span>
                 </div>
 
-                {draft.caption && (
-                  <div class="plan-item-caption">{draft.caption}</div>
+                {(draft.assembledPost || draft.caption) && (
+                  <div class="plan-item-caption">{draft.assembledPost || draft.caption}</div>
                 )}
 
                 {draft.images.length > 0 && (

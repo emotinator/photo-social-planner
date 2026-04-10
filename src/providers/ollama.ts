@@ -76,8 +76,40 @@ export const ollamaProvider: LLMProvider = {
     const data = await res.json()
     const raw = data.message?.content || ''
 
+    // Template mode: extract all keys as llmFills
+    if (req.templateLLMFields) {
+      return parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key))
+    }
+
     return parseResponse(raw)
   },
+}
+
+function parseTemplateResponse(raw: string, expectedKeys: string[]): GenerateResponse {
+  try {
+    const parsed = JSON.parse(raw)
+    const llmFills: Record<string, string> = {}
+    for (const key of expectedKeys) {
+      llmFills[key] = String(parsed[key] || '')
+    }
+    return {
+      title: '',
+      caption: '',
+      hashtags: [],
+      templateFields: {},
+      llmFills,
+      raw,
+    }
+  } catch {
+    return {
+      title: '',
+      caption: raw,
+      hashtags: [],
+      templateFields: {},
+      llmFills: {},
+      raw,
+    }
+  }
 }
 
 function parseResponse(raw: string): GenerateResponse {

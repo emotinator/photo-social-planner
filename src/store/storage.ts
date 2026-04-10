@@ -1,20 +1,25 @@
 import { openDB, type IDBPDatabase } from 'idb'
-import type { Draft, DraftImage } from '../types'
+import type { Draft, DraftImage, PostTemplate, SnippetSet, CaptionVoice } from '../types'
 
 const DB_NAME = 'photo-social-planner'
-const DB_VERSION = 1
+const DB_VERSION = 3
 
 let dbPromise: Promise<IDBPDatabase> | null = null
 
 function getDB() {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains('drafts')) {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
           db.createObjectStore('drafts', { keyPath: 'id' })
-        }
-        if (!db.objectStoreNames.contains('images')) {
           db.createObjectStore('images', { keyPath: 'id' })
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore('templates', { keyPath: 'id' })
+          db.createObjectStore('snippetSets', { keyPath: 'id' })
+        }
+        if (oldVersion < 3) {
+          db.createObjectStore('captionVoices', { keyPath: 'id' })
         }
       },
     })
@@ -119,6 +124,104 @@ export async function deleteDraft(id: string): Promise<void> {
   }
 
   await db.delete('drafts', id)
+}
+
+// Template CRUD
+export async function saveTemplate(template: PostTemplate): Promise<void> {
+  const db = await getDB()
+  await db.put('templates', template)
+}
+
+export async function loadAllTemplates(): Promise<PostTemplate[]> {
+  const db = await getDB()
+  return db.getAll('templates')
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  const db = await getDB()
+  await db.delete('templates', id)
+}
+
+// Snippet Set CRUD
+export async function saveSnippetSet(set: SnippetSet): Promise<void> {
+  const db = await getDB()
+  await db.put('snippetSets', set)
+}
+
+export async function loadAllSnippetSets(): Promise<SnippetSet[]> {
+  const db = await getDB()
+  return db.getAll('snippetSets')
+}
+
+export async function deleteSnippetSet(id: string): Promise<void> {
+  const db = await getDB()
+  await db.delete('snippetSets', id)
+}
+
+// Caption Voice CRUD
+export async function saveCaptionVoice(voice: CaptionVoice): Promise<void> {
+  const db = await getDB()
+  await db.put('captionVoices', voice)
+}
+
+export async function loadAllCaptionVoices(): Promise<CaptionVoice[]> {
+  const db = await getDB()
+  return db.getAll('captionVoices')
+}
+
+export async function deleteCaptionVoice(id: string): Promise<void> {
+  const db = await getDB()
+  await db.delete('captionVoices', id)
+}
+
+// Export/Import
+export async function exportTemplateBundle(): Promise<string> {
+  const templates = await loadAllTemplates()
+  const snippetSets = await loadAllSnippetSets()
+  const captionVoices = await loadAllCaptionVoices()
+  return JSON.stringify({
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    templates,
+    snippetSets,
+    captionVoices,
+  }, null, 2)
+}
+
+export async function importTemplateBundle(json: string): Promise<{ templates: number; snippetSets: number; voices: number }> {
+  const data = JSON.parse(json)
+  if (!data.version || !Array.isArray(data.templates) || !Array.isArray(data.snippetSets)) {
+    throw new Error('Invalid template bundle format')
+  }
+
+  let tCount = 0
+  let sCount = 0
+  let vCount = 0
+
+  for (const t of data.templates) {
+    if (t.id && t.name && typeof t.body === 'string') {
+      await saveTemplate(t as PostTemplate)
+      tCount++
+    }
+  }
+
+  for (const s of data.snippetSets) {
+    if (s.id && s.name && Array.isArray(s.options)) {
+      await saveSnippetSet(s as SnippetSet)
+      sCount++
+    }
+  }
+
+  if (Array.isArray(data.captionVoices)) {
+    for (const v of data.captionVoices) {
+      if (v.id && v.name && typeof v.description === 'string') {
+        await saveCaptionVoice(v as CaptionVoice)
+        vCount++
+      }
+    }
+  }
+
+  return { templates: tCount, snippetSets: sCount, voices: vCount }
 }
 
 // Image utilities
