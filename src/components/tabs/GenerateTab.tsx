@@ -4,7 +4,7 @@ import {
   currentImages, currentNotes, currentPlatform,
   isGenerating, generationError, generationResult,
   editTitle, editCaption, editHashtags,
-  activeTab, showToast,
+  activeTab, showToast, editingDraftId,
   allTemplates, allSnippetSets, selectedTemplateId,
   snippetSelections, assembledPost,
   allCaptionVoices, selectedVoiceIds, voiceVariants, chosenVoiceId,
@@ -38,6 +38,26 @@ export function GenerateTab() {
   const titLen = titleLength.value
   const templateStatic = activeTemplate ? staticTextLength(activeTemplate.body) : 0
   const { budget, platformMax } = calcCaptionBudget(currentPlatform.value, capLen, templateStatic)
+
+  // Detect if workspace has generated content
+  const hasResult = !!(editCaption.value || assembledPost.value)
+  const isEditing = !!editingDraftId.value
+
+  const handleNewPost = useCallback(() => {
+    currentImages.value = []
+    currentNotes.value = ''
+    editTitle.value = ''
+    editCaption.value = ''
+    editHashtags.value = []
+    assembledPost.value = ''
+    generationResult.value = null
+    generationError.value = null
+    voiceVariants.value = {}
+    chosenVoiceId.value = null
+    editingDraftId.value = null
+    snippetSelections.value = {}
+    showToast('Workspace cleared', 'info')
+  }, [])
 
   const voices = allCaptionVoices.value
   const selVoiceIds = selectedVoiceIds.value
@@ -182,6 +202,21 @@ export function GenerateTab() {
 
   return (
     <>
+      {/* New Post button — shown when workspace has generated content */}
+      {hasResult && (
+        <div class="section">
+          <button class="btn btn-ghost btn-full" onClick={handleNewPost}>
+            <span class="material-symbols-outlined" style={{ fontSize: '16px' }}>add_circle</span>
+            New Post
+          </button>
+          {isEditing && (
+            <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", textAlign: 'center', marginTop: '4px' }}>
+              Editing saved draft &middot; go to Plan tab to save
+            </div>
+          )}
+        </div>
+      )}
+
       <div class="section">
         <div class="section-label">Provider</div>
         <div class="field-row">
@@ -462,31 +497,20 @@ export function GenerateTab() {
 
       {/* Template mode: single assembled post textarea */}
       {isTemplateMode && assembledPost.value && (
-        <>
-          <div class="section">
-            <div class="section-label">Assembled Post</div>
-            <div class="result-field">
-              <textarea
-                class="template-editor"
-                rows={14}
-                value={assembledPost.value}
-                onInput={(e) => (assembledPost.value = (e.target as HTMLTextAreaElement).value)}
-              />
-              <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", textAlign: 'right' }}>
-                {assembledPost.value.length} characters
-              </div>
+        <div class="section">
+          <div class="section-label">Assembled Post</div>
+          <div class="result-field">
+            <textarea
+              class="template-editor"
+              rows={14}
+              value={assembledPost.value}
+              onInput={(e) => (assembledPost.value = (e.target as HTMLTextAreaElement).value)}
+            />
+            <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", textAlign: 'right' }}>
+              {assembledPost.value.length} characters
             </div>
           </div>
-
-          <div class="section">
-            <div class="btn-row">
-              <button class="btn btn-ghost btn-sm" onClick={() => (activeTab.value = 'preview')}>
-                <span class="material-symbols-outlined" style={{ fontSize: '14px' }}>visibility</span>
-                Preview
-              </button>
-            </div>
-          </div>
-        </>
+        </div>
       )}
 
       {/* Classic mode: title/caption/hashtags */}
@@ -538,15 +562,6 @@ export function GenerateTab() {
                 style={{ flex: 1 }}
               />
               <button class="btn btn-ghost btn-sm" onClick={addHashtag}>Add</button>
-            </div>
-          </div>
-
-          <div class="section">
-            <div class="btn-row">
-              <button class="btn btn-ghost btn-sm" onClick={() => (activeTab.value = 'preview')}>
-                <span class="material-symbols-outlined" style={{ fontSize: '14px' }}>visibility</span>
-                Preview
-              </button>
             </div>
           </div>
         </>

@@ -243,6 +243,7 @@ select:focus { border-color: var(--accent); }
 }
 .plan-item:hover { border-color: var(--accent); }
 .plan-item.dragging { opacity: 0.4; transform: scale(0.98); }
+.plan-item-active { border-color: var(--accent); background: var(--accent-dim); }
 .plan-item-drop-target { border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent-dim); }
 .plan-item-header {
   display: flex; align-items: center; margin-bottom: 6px; gap: 6px;

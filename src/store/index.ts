@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals'
 import type { Draft, DraftImage, ProviderConfig, PlatformId, GenerateResponse, PostTemplate, SnippetSet, CaptionVoice } from '../types'
 
-export type TabId = 'images' | 'generate' | 'templates' | 'preview' | 'deliver' | 'plan' | 'settings'
+export type TabId = 'images' | 'generate' | 'templates' | 'deliver' | 'plan' | 'settings'
 
 // UI state
 export const activeTab = signal<TabId>('images')

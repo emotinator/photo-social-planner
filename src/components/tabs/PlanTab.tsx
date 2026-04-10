@@ -5,6 +5,7 @@ import {
   activeTab, showToast, editingDraftId,
   selectedProvider, selectedModel,
   assembledPost, selectedTemplateId, snippetSelections,
+  voiceVariants, chosenVoiceId, generationError,
 } from '../../store'
 import { saveDraft, loadAllDrafts, deleteDraft } from '../../store/storage'
 import { PLATFORMS } from '../../types'
@@ -17,10 +18,25 @@ const PLATFORM_ICONS: Record<PlatformId, string> = {
   facebook: 'public',
 }
 
+/** Derive a display title from workspace state */
+function deriveTitle(): string {
+  // Use explicit title if set
+  if (editTitle.value.trim()) return editTitle.value.trim()
+  // Fall back to first ~40 chars of caption/assembled post
+  const text = assembledPost.value || editCaption.value
+  if (text.trim()) {
+    const firstLine = text.trim().split('\n')[0]
+    if (firstLine.length <= 50) return firstLine
+    return firstLine.substring(0, 47) + '...'
+  }
+  return 'Untitled Draft'
+}
+
 export function PlanTab() {
   const drafts = savedDrafts.value
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({})
   const hasContent = editCaption.value || editTitle.value || assembledPost.value || currentImages.value.length > 0
+  const isEditing = !!editingDraftId.value
 
   // Drag state
   const [dragIdx, setDragIdx] = useState<number | null>(null)
@@ -48,24 +64,18 @@ export function PlanTab() {
     return () => Object.values(urls).forEach(URL.revokeObjectURL)
   }, [drafts])
 
-  const handleSave = useCallback(async () => {
-    const images = currentImages.value
-    if (images.length === 0 && !editCaption.value && !assembledPost.value) {
-      showToast('Nothing to save', 'error')
-      return
-    }
-
+  /** Build a draft object from the current workspace */
+  const buildDraft = useCallback((id: string, existing?: Draft | null): Draft => {
     const now = new Date().toISOString()
     const isTemplateMode = !!selectedTemplateId.value
-    const existing = editingDraftId.value ? drafts.find((d: Draft) => d.id === editingDraftId.value) : null
-    const draft: Draft = {
-      id: editingDraftId.value || crypto.randomUUID(),
+    return {
+      id,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       status: existing?.status || 'draft',
       platform: currentPlatform.value,
-      images,
-      title: editTitle.value,
+      images: currentImages.value,
+      title: deriveTitle(),
       caption: isTemplateMode ? '' : editCaption.value,
       hashtags: isTemplateMode ? [] : editHashtags.value,
       templateFields: {},
@@ -89,12 +99,40 @@ export function PlanTab() {
           }
         : undefined,
     }
+  }, [drafts])
 
+  /** Overwrite the existing draft */
+  const handleOverwrite = useCallback(async () => {
+    if (!editingDraftId.value) return
+    const existing = drafts.find((d: Draft) => d.id === editingDraftId.value)
+    const draft = buildDraft(editingDraftId.value, existing)
     await saveDraft(draft)
     savedDrafts.value = await loadAllDrafts()
-    editingDraftId.value = null
-    showToast('Draft saved!', 'success')
-  }, [drafts])
+    showToast('Draft updated!', 'success')
+  }, [drafts, buildDraft])
+
+  /** Save as a new draft (detach from the one being edited) */
+  const handleSaveNew = useCallback(async () => {
+    const images = currentImages.value
+    if (images.length === 0 && !editCaption.value && !assembledPost.value) {
+      showToast('Nothing to save', 'error')
+      return
+    }
+    const draft = buildDraft(crypto.randomUUID(), null)
+    await saveDraft(draft)
+    savedDrafts.value = await loadAllDrafts()
+    editingDraftId.value = draft.id
+    showToast('Saved as new draft!', 'success')
+  }, [drafts, buildDraft])
+
+  /** Quick save — overwrite if editing, otherwise save new */
+  const handleSave = useCallback(async () => {
+    if (isEditing) {
+      await handleOverwrite()
+    } else {
+      await handleSaveNew()
+    }
+  }, [isEditing, handleOverwrite, handleSaveNew])
 
   const handleDelete = async (id: string) => {
     await deleteDraft(id)
@@ -136,7 +174,6 @@ export function PlanTab() {
 
   const handleDateChange = async (draft: Draft, dateStr: string) => {
     const updated = { ...draft, plannedDate: dateStr || undefined, updatedAt: new Date().toISOString() }
-    // Auto-transition to planned when a date is set
     if (dateStr && draft.status === 'draft') {
       updated.status = 'planned'
     }
@@ -151,7 +188,6 @@ export function PlanTab() {
       e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', String(idx))
     }
-    // Style the dragged item
     const el = (e.target as HTMLElement).closest('.plan-item') as HTMLDivElement
     if (el) {
       dragItemRef.current = el
@@ -180,13 +216,9 @@ export function PlanTab() {
       handleDragEnd()
       return
     }
-
-    // Reorder the sorted array
     const reordered = [...sorted]
     const [moved] = reordered.splice(dragIdx, 1)
     reordered.splice(dropIdx, 0, moved)
-
-    // Update planOrder on all items and persist
     for (let i = 0; i < reordered.length; i++) {
       const updated = { ...reordered[i], planOrder: i }
       await saveDraft(updated)
@@ -196,36 +228,54 @@ export function PlanTab() {
     showToast('Order updated', 'info')
   }
 
-  // Sort: by planOrder if available, then by status group, then by plannedDate, then updatedAt
+  // Sort
   const sorted = [...drafts].sort((a: Draft, b: Draft) => {
-    // If both have planOrder, use it
     if (a.planOrder !== undefined && b.planOrder !== undefined) {
       return a.planOrder - b.planOrder
     }
     const order: Record<string, number> = { planned: 0, draft: 1, posted: 2 }
     const diff = order[a.status] - order[b.status]
     if (diff !== 0) return diff
-    // Within same status: sort by planned date (soonest first), then updatedAt
     if (a.plannedDate && b.plannedDate) return a.plannedDate.localeCompare(b.plannedDate)
     if (a.plannedDate) return -1
     if (b.plannedDate) return 1
     return b.updatedAt.localeCompare(a.updatedAt)
   })
 
-  // Group by date for visual separation
   const today = new Date().toISOString().split('T')[0]
 
   return (
     <>
+      {/* ── Save controls ── */}
       {hasContent && (
         <div class="section">
-          <button class="btn btn-accent btn-full" onClick={handleSave}>
-            <span class="material-symbols-outlined" style={{ fontSize: '16px' }}>save</span>
-            {editingDraftId.value ? 'Update Draft' : 'Save Draft'}
-          </button>
+          {isEditing ? (
+            <>
+              {/* Editing an existing draft — offer overwrite or save-new */}
+              <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginBottom: '8px', textAlign: 'center' }}>
+                Editing: {drafts.find((d: Draft) => d.id === editingDraftId.value)?.title || 'draft'}
+              </div>
+              <div class="btn-row" style={{ gap: '6px' }}>
+                <button class="btn btn-accent" style={{ flex: 1 }} onClick={handleOverwrite}>
+                  <span class="material-symbols-outlined" style={{ fontSize: '16px' }}>save</span>
+                  Overwrite
+                </button>
+                <button class="btn btn-ghost" style={{ flex: 1 }} onClick={handleSaveNew}>
+                  <span class="material-symbols-outlined" style={{ fontSize: '16px' }}>add_circle</span>
+                  Save New
+                </button>
+              </div>
+            </>
+          ) : (
+            <button class="btn btn-accent btn-full" onClick={handleSaveNew}>
+              <span class="material-symbols-outlined" style={{ fontSize: '16px' }}>save</span>
+              Save Draft
+            </button>
+          )}
         </div>
       )}
 
+      {/* ── Draft list ── */}
       <div class="section">
         <div class="section-label">Saved Drafts ({drafts.length})</div>
 
@@ -241,18 +291,18 @@ export function PlanTab() {
               const isOverdue = draft.plannedDate && draft.plannedDate < today && draft.status !== 'posted'
               const isToday = draft.plannedDate === today
               const isDragOver = overIdx === idx && dragIdx !== null && dragIdx !== idx
+              const isActive = editingDraftId.value === draft.id
 
               return (
                 <div
                   key={draft.id}
-                  class={`plan-item ${isDragOver ? 'plan-item-drop-target' : ''}`}
+                  class={`plan-item ${isDragOver ? 'plan-item-drop-target' : ''} ${isActive ? 'plan-item-active' : ''}`}
                   draggable
                   onDragStart={(e) => handleDragStart(e, idx)}
                   onDragOver={(e) => handleDragOver(e, idx)}
                   onDragEnd={handleDragEnd}
                   onDrop={(e) => handleDrop(e, idx)}
                 >
-                  {/* Drag handle + header row */}
                   <div class="plan-item-header">
                     <span
                       class="material-symbols-outlined plan-drag-handle"
@@ -264,12 +314,10 @@ export function PlanTab() {
                       {draft.title || 'Untitled Draft'}
                     </div>
                     <div class="plan-item-badges">
-                      {/* Platform tag */}
                       <span class={`badge badge-platform badge-platform-${draft.platform}`} title={platformConfig.name}>
                         <span class="material-symbols-outlined" style={{ fontSize: '11px' }}>{icon}</span>
                         {platformConfig.name}
                       </span>
-                      {/* Status badge */}
                       <span
                         class={`badge badge-${draft.status}`}
                         onClick={() => toggleStatus(draft)}
@@ -302,7 +350,6 @@ export function PlanTab() {
                     </div>
                   )}
 
-                  {/* Planned date row */}
                   <div class="plan-item-meta">
                     <div class="plan-date-picker">
                       <span class="material-symbols-outlined" style={{ fontSize: '13px', color: 'var(--text3)' }}>calendar_month</span>
@@ -321,7 +368,7 @@ export function PlanTab() {
                       )}
                     </div>
                     <div class="plan-item-date">
-                      Updated {new Date(draft.updatedAt).toLocaleDateString()}
+                      {new Date(draft.updatedAt).toLocaleDateString()}
                     </div>
                   </div>
 

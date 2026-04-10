@@ -7,7 +7,8 @@ export function Canvas() {
   const isTemplateMode = !!selectedTemplateId.value
   const hasContent = isTemplateMode ? !!assembledPost.value : (editCaption.value || editTitle.value)
 
-  if (tab === 'preview' || (tab === 'generate' && hasContent)) {
+  // Show IG preview on generate (when content exists) and deliver tabs
+  if ((tab === 'generate' || tab === 'deliver') && hasContent) {
     const caption = isTemplateMode ? assembledPost.value : editCaption.value
     const hashtags = isTemplateMode ? [] : editHashtags.value
     return (
