@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'preact/hooks'
+import { useEffect, useState, useCallback, useRef } from 'preact/hooks'
 import {
   savedDrafts, currentImages, currentNotes, currentPlatform,
   editTitle, editCaption, editHashtags, generationResult,
@@ -7,12 +7,25 @@ import {
   assembledPost, selectedTemplateId, snippetSelections,
 } from '../../store'
 import { saveDraft, loadAllDrafts, deleteDraft } from '../../store/storage'
-import type { Draft, DraftImage } from '../../types'
+import { PLATFORMS } from '../../types'
+import type { Draft, DraftImage, PlatformId } from '../../types'
+
+const PLATFORM_ICONS: Record<PlatformId, string> = {
+  instagram: 'photo_camera',
+  threads: 'alternate_email',
+  linkedin: 'work',
+  facebook: 'public',
+}
 
 export function PlanTab() {
   const drafts = savedDrafts.value
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({})
   const hasContent = editCaption.value || editTitle.value || assembledPost.value || currentImages.value.length > 0
+
+  // Drag state
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [overIdx, setOverIdx] = useState<number | null>(null)
+  const dragItemRef = useRef<HTMLDivElement | null>(null)
 
   // Load drafts on mount
   useEffect(() => {
@@ -44,11 +57,12 @@ export function PlanTab() {
 
     const now = new Date().toISOString()
     const isTemplateMode = !!selectedTemplateId.value
+    const existing = editingDraftId.value ? drafts.find((d: Draft) => d.id === editingDraftId.value) : null
     const draft: Draft = {
       id: editingDraftId.value || crypto.randomUUID(),
-      createdAt: editingDraftId.value ? (drafts.find((d: Draft) => d.id === editingDraftId.value)?.createdAt || now) : now,
+      createdAt: existing?.createdAt || now,
       updatedAt: now,
-      status: 'draft',
+      status: existing?.status || 'draft',
       platform: currentPlatform.value,
       images,
       title: editTitle.value,
@@ -63,6 +77,8 @@ export function PlanTab() {
             timestamp: now,
           }
         : undefined,
+      plannedDate: existing?.plannedDate,
+      planOrder: existing?.planOrder ?? sorted.length,
       assembledPost: isTemplateMode ? assembledPost.value : undefined,
       templateId: selectedTemplateId.value || undefined,
       templateResolution: isTemplateMode && selectedTemplateId.value
@@ -118,13 +134,86 @@ export function PlanTab() {
     savedDrafts.value = await loadAllDrafts()
   }
 
-  // Sort: planned first, then draft, then posted; within each group by updatedAt desc
+  const handleDateChange = async (draft: Draft, dateStr: string) => {
+    const updated = { ...draft, plannedDate: dateStr || undefined, updatedAt: new Date().toISOString() }
+    // Auto-transition to planned when a date is set
+    if (dateStr && draft.status === 'draft') {
+      updated.status = 'planned'
+    }
+    await saveDraft(updated)
+    savedDrafts.value = await loadAllDrafts()
+  }
+
+  // ── Drag reorder ──
+  const handleDragStart = (e: DragEvent, idx: number) => {
+    setDragIdx(idx)
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', String(idx))
+    }
+    // Style the dragged item
+    const el = (e.target as HTMLElement).closest('.plan-item') as HTMLDivElement
+    if (el) {
+      dragItemRef.current = el
+      requestAnimationFrame(() => el.classList.add('dragging'))
+    }
+  }
+
+  const handleDragOver = (e: DragEvent, idx: number) => {
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+    if (dragIdx !== null && idx !== dragIdx) {
+      setOverIdx(idx)
+    }
+  }
+
+  const handleDragEnd = () => {
+    if (dragItemRef.current) dragItemRef.current.classList.remove('dragging')
+    dragItemRef.current = null
+    setDragIdx(null)
+    setOverIdx(null)
+  }
+
+  const handleDrop = async (e: DragEvent, dropIdx: number) => {
+    e.preventDefault()
+    if (dragIdx === null || dragIdx === dropIdx) {
+      handleDragEnd()
+      return
+    }
+
+    // Reorder the sorted array
+    const reordered = [...sorted]
+    const [moved] = reordered.splice(dragIdx, 1)
+    reordered.splice(dropIdx, 0, moved)
+
+    // Update planOrder on all items and persist
+    for (let i = 0; i < reordered.length; i++) {
+      const updated = { ...reordered[i], planOrder: i }
+      await saveDraft(updated)
+    }
+    savedDrafts.value = await loadAllDrafts()
+    handleDragEnd()
+    showToast('Order updated', 'info')
+  }
+
+  // Sort: by planOrder if available, then by status group, then by plannedDate, then updatedAt
   const sorted = [...drafts].sort((a: Draft, b: Draft) => {
+    // If both have planOrder, use it
+    if (a.planOrder !== undefined && b.planOrder !== undefined) {
+      return a.planOrder - b.planOrder
+    }
     const order: Record<string, number> = { planned: 0, draft: 1, posted: 2 }
     const diff = order[a.status] - order[b.status]
     if (diff !== 0) return diff
+    // Within same status: sort by planned date (soonest first), then updatedAt
+    if (a.plannedDate && b.plannedDate) return a.plannedDate.localeCompare(b.plannedDate)
+    if (a.plannedDate) return -1
+    if (b.plannedDate) return 1
     return b.updatedAt.localeCompare(a.updatedAt)
   })
+
+  // Group by date for visual separation
+  const today = new Date().toISOString().split('T')[0]
 
   return (
     <>
@@ -146,57 +235,107 @@ export function PlanTab() {
           </div>
         ) : (
           <div class="plan-list">
-            {sorted.map((draft) => (
-              <div key={draft.id} class="plan-item">
-                <div class="plan-item-header">
-                  <div class="plan-item-title">
-                    {draft.title || 'Untitled Draft'}
-                  </div>
-                  <span
-                    class={`badge badge-${draft.status}`}
-                    onClick={() => toggleStatus(draft)}
-                    style={{ cursor: 'pointer' }}
-                    title="Click to change status"
-                  >
-                    {draft.status}
-                  </span>
-                </div>
+            {sorted.map((draft, idx) => {
+              const platformConfig = PLATFORMS[draft.platform]
+              const icon = PLATFORM_ICONS[draft.platform]
+              const isOverdue = draft.plannedDate && draft.plannedDate < today && draft.status !== 'posted'
+              const isToday = draft.plannedDate === today
+              const isDragOver = overIdx === idx && dragIdx !== null && dragIdx !== idx
 
-                {(draft.assembledPost || draft.caption) && (
-                  <div class="plan-item-caption">{draft.assembledPost || draft.caption}</div>
-                )}
-
-                {draft.images.length > 0 && (
-                  <div class="plan-item-images">
-                    {draft.images.slice(0, 4).map((img: DraftImage) => (
-                      <img
-                        key={img.id}
-                        src={thumbUrls[img.id] || ''}
-                        alt={img.filename}
-                      />
-                    ))}
-                    {draft.images.length > 4 && (
-                      <span style={{ fontSize: '11px', color: 'var(--text3)', alignSelf: 'center', fontFamily: "'DM Mono', monospace" }}>
-                        +{draft.images.length - 4}
+              return (
+                <div
+                  key={draft.id}
+                  class={`plan-item ${isDragOver ? 'plan-item-drop-target' : ''}`}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, idx)}
+                  onDragOver={(e) => handleDragOver(e, idx)}
+                  onDragEnd={handleDragEnd}
+                  onDrop={(e) => handleDrop(e, idx)}
+                >
+                  {/* Drag handle + header row */}
+                  <div class="plan-item-header">
+                    <span
+                      class="material-symbols-outlined plan-drag-handle"
+                      title="Drag to reorder"
+                    >
+                      drag_indicator
+                    </span>
+                    <div class="plan-item-title">
+                      {draft.title || 'Untitled Draft'}
+                    </div>
+                    <div class="plan-item-badges">
+                      {/* Platform tag */}
+                      <span class={`badge badge-platform badge-platform-${draft.platform}`} title={platformConfig.name}>
+                        <span class="material-symbols-outlined" style={{ fontSize: '11px' }}>{icon}</span>
+                        {platformConfig.name}
                       </span>
-                    )}
+                      {/* Status badge */}
+                      <span
+                        class={`badge badge-${draft.status}`}
+                        onClick={() => toggleStatus(draft)}
+                        style={{ cursor: 'pointer' }}
+                        title="Click to change status"
+                      >
+                        {draft.status}
+                      </span>
+                    </div>
                   </div>
-                )}
 
-                <div class="plan-item-date">
-                  {new Date(draft.updatedAt).toLocaleDateString()} &middot; {draft.platform}
-                </div>
+                  {(draft.assembledPost || draft.caption) && (
+                    <div class="plan-item-caption">{draft.assembledPost || draft.caption}</div>
+                  )}
 
-                <div class="btn-row" style={{ marginTop: '8px' }}>
-                  <button class="btn btn-ghost btn-sm" onClick={() => handleLoad(draft)}>
-                    Edit
-                  </button>
-                  <button class="btn btn-danger btn-sm" onClick={() => handleDelete(draft.id)}>
-                    Delete
-                  </button>
+                  {draft.images.length > 0 && (
+                    <div class="plan-item-images">
+                      {draft.images.slice(0, 4).map((img: DraftImage) => (
+                        <img
+                          key={img.id}
+                          src={thumbUrls[img.id] || ''}
+                          alt={img.filename}
+                        />
+                      ))}
+                      {draft.images.length > 4 && (
+                        <span style={{ fontSize: '11px', color: 'var(--text3)', alignSelf: 'center', fontFamily: "'DM Mono', monospace" }}>
+                          +{draft.images.length - 4}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Planned date row */}
+                  <div class="plan-item-meta">
+                    <div class="plan-date-picker">
+                      <span class="material-symbols-outlined" style={{ fontSize: '13px', color: 'var(--text3)' }}>calendar_month</span>
+                      <input
+                        type="date"
+                        class={`plan-date-input ${isOverdue ? 'overdue' : ''} ${isToday ? 'today' : ''}`}
+                        value={draft.plannedDate || ''}
+                        onChange={(e) => handleDateChange(draft, (e.target as HTMLInputElement).value)}
+                        title="Planned post date"
+                      />
+                      {isOverdue && (
+                        <span class="plan-date-flag overdue">overdue</span>
+                      )}
+                      {isToday && (
+                        <span class="plan-date-flag today">today</span>
+                      )}
+                    </div>
+                    <div class="plan-item-date">
+                      Updated {new Date(draft.updatedAt).toLocaleDateString()}
+                    </div>
+                  </div>
+
+                  <div class="btn-row" style={{ marginTop: '8px' }}>
+                    <button class="btn btn-ghost btn-sm" onClick={() => handleLoad(draft)}>
+                      Edit
+                    </button>
+                    <button class="btn btn-danger btn-sm" onClick={() => handleDelete(draft.id)}>
+                      Delete
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

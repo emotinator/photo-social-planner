@@ -179,16 +179,30 @@ export async function exportTemplateBundle(): Promise<string> {
   const templates = await loadAllTemplates()
   const snippetSets = await loadAllSnippetSets()
   const captionVoices = await loadAllCaptionVoices()
+
+  // Include all persisted settings
+  const settings: Record<string, unknown> = {}
+  const genSettings = localStorage.getItem('psp-gen-settings')
+  if (genSettings) {
+    try { settings.generation = JSON.parse(genSettings) } catch {}
+  }
+  const providerConfigs = localStorage.getItem('psp-providers')
+  if (providerConfigs) {
+    try { settings.providers = JSON.parse(providerConfigs) } catch {}
+  }
+  settings.theme = localStorage.getItem('psp-theme') || 'dark'
+
   return JSON.stringify({
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     templates,
     snippetSets,
     captionVoices,
+    settings,
   }, null, 2)
 }
 
-export async function importTemplateBundle(json: string): Promise<{ templates: number; snippetSets: number; voices: number }> {
+export async function importTemplateBundle(json: string): Promise<{ templates: number; snippetSets: number; voices: number; settingsRestored: boolean }> {
   const data = JSON.parse(json)
   if (!data.version || !Array.isArray(data.templates) || !Array.isArray(data.snippetSets)) {
     throw new Error('Invalid template bundle format')
@@ -197,6 +211,7 @@ export async function importTemplateBundle(json: string): Promise<{ templates: n
   let tCount = 0
   let sCount = 0
   let vCount = 0
+  let settingsRestored = false
 
   for (const t of data.templates) {
     if (t.id && t.name && typeof t.body === 'string') {
@@ -221,7 +236,21 @@ export async function importTemplateBundle(json: string): Promise<{ templates: n
     }
   }
 
-  return { templates: tCount, snippetSets: sCount, voices: vCount }
+  // Restore settings if present
+  if (data.settings) {
+    if (data.settings.generation) {
+      localStorage.setItem('psp-gen-settings', JSON.stringify(data.settings.generation))
+    }
+    if (data.settings.providers) {
+      localStorage.setItem('psp-providers', JSON.stringify(data.settings.providers))
+    }
+    if (data.settings.theme) {
+      localStorage.setItem('psp-theme', data.settings.theme)
+    }
+    settingsRestored = true
+  }
+
+  return { templates: tCount, snippetSets: sCount, voices: vCount, settingsRestored }
 }
 
 // Image utilities

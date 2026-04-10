@@ -21,6 +21,12 @@ export const toggleTheme = () => {
   applyTheme(theme.value)
 }
 
+// Caption & title length controls
+export type CaptionLength = 0.5 | 1 | 2 | 3 | 0  // 0 = no limit
+export type TitleLength = 1 | 2 | 4 | 6 | 8 | 0    // word count, 0 = no limit
+export const captionLength = signal<CaptionLength>(1)
+export const titleLength = signal<TitleLength>(6)
+
 // Current draft workspace
 export const currentImages = signal<DraftImage[]>([])
 export const currentNotes = signal('')
@@ -94,7 +100,10 @@ export const showToast = (message: string, type: ToastMsg['type'] = 'info') => {
   }, 3000)
 }
 
-// Load provider configs from localStorage
+// ── Persist & restore settings from localStorage ──
+import { effect } from '@preact/signals'
+
+// Provider configs
 const savedConfigs = localStorage.getItem('psp-providers')
 if (savedConfigs) {
   try {
@@ -102,9 +111,32 @@ if (savedConfigs) {
     providerConfigs.value = { ...providerConfigs.value, ...parsed }
   } catch {}
 }
-
-// Auto-save provider configs
-import { effect } from '@preact/signals'
 effect(() => {
   localStorage.setItem('psp-providers', JSON.stringify(providerConfigs.value))
+})
+
+// Restore last-used generation settings
+const savedSettings = localStorage.getItem('psp-gen-settings')
+if (savedSettings) {
+  try {
+    const s = JSON.parse(savedSettings)
+    if (s.provider) selectedProvider.value = s.provider
+    if (s.model) selectedModel.value = s.model
+    if (s.platform) currentPlatform.value = s.platform
+    if (s.captionLength !== undefined) captionLength.value = s.captionLength
+    if (s.titleLength !== undefined) titleLength.value = s.titleLength
+    if (s.templateId !== undefined) selectedTemplateId.value = s.templateId
+  } catch {}
+}
+
+// Auto-save generation settings
+effect(() => {
+  localStorage.setItem('psp-gen-settings', JSON.stringify({
+    provider: selectedProvider.value,
+    model: selectedModel.value,
+    platform: currentPlatform.value,
+    captionLength: captionLength.value,
+    titleLength: titleLength.value,
+    templateId: selectedTemplateId.value,
+  }))
 })

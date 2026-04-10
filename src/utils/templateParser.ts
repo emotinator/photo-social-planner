@@ -47,6 +47,11 @@ export function assembleTemplate(
   })
 }
 
+/** Count the static (non-placeholder) characters in a template body */
+export function staticTextLength(body: string): number {
+  return body.replace(PLACEHOLDER_RE, '').length
+}
+
 export function validateTemplate(
   body: string,
   availableSetNames: string[]

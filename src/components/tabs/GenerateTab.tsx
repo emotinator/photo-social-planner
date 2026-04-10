@@ -8,11 +8,13 @@ import {
   allTemplates, allSnippetSets, selectedTemplateId,
   snippetSelections, assembledPost,
   allCaptionVoices, selectedVoiceIds, voiceVariants, chosenVoiceId,
+  captionLength, titleLength,
+  type CaptionLength, type TitleLength,
 } from '../../store'
 import { getProvider, getAllProviders } from '../../providers/registry'
 import { resizeForLLM, loadAllCaptionVoices } from '../../store/storage'
-import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt } from '../../utils/prompts'
-import { extractLLMFields, extractUserFields, assembleTemplate } from '../../utils/templateParser'
+import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt, getLengthSpec, calcCaptionBudget, getTitleSpec } from '../../utils/prompts'
+import { extractLLMFields, extractUserFields, assembleTemplate, staticTextLength } from '../../utils/templateParser'
 import { useState, useEffect as useEffectAlias } from 'preact/hooks'
 import type { PostTemplate, SnippetSet, CaptionVoice } from '../../types'
 
@@ -31,6 +33,11 @@ export function GenerateTab() {
   const activeTemplate = templateId ? templates.find((t: PostTemplate) => t.id === templateId) : null
   const userFields = activeTemplate ? extractUserFields(activeTemplate.body) : []
   const isTemplateMode = !!activeTemplate
+
+  const capLen = captionLength.value
+  const titLen = titleLength.value
+  const templateStatic = activeTemplate ? staticTextLength(activeTemplate.body) : 0
+  const { budget, platformMax } = calcCaptionBudget(currentPlatform.value, capLen, templateStatic)
 
   const voices = allCaptionVoices.value
   const selVoiceIds = selectedVoiceIds.value
@@ -82,6 +89,10 @@ export function GenerateTab() {
         .filter(Boolean) as CaptionVoice[]
       const hasMultipleVoices = activeVoices.length > 1
 
+      const capLenVal = captionLength.value
+      const titLenVal = titleLength.value
+      const tmplStatic = activeTemplate ? staticTextLength(activeTemplate.body) : 0
+
       if (isTemplateMode && activeTemplate) {
         // Template mode
         const llmFieldKeys = extractLLMFields(activeTemplate.body)
@@ -91,7 +102,7 @@ export function GenerateTab() {
           // Generate one variant per voice
           const newVariants: Record<string, string> = {}
           for (const voice of activeVoices) {
-            const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voice.description)
+            const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voice.description, capLenVal, titLenVal, tmplStatic)
             const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields })
             const fills = result.llmFills || {}
             newVariants[voice.id] = assembleTemplate(activeTemplate.body, fills, snippetSelections.value)
@@ -105,7 +116,7 @@ export function GenerateTab() {
         } else {
           // Single voice or no voice
           const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined
-          const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voiceDesc)
+          const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voiceDesc, capLenVal, titLenVal, tmplStatic)
           const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields })
           generationResult.value = result
           const fills = result.llmFills || {}
@@ -122,7 +133,7 @@ export function GenerateTab() {
           const newVariants: Record<string, string> = {}
           let lastResult = null
           for (const voice of activeVoices) {
-            const systemPrompt = buildSystemPrompt(platform, voice.description)
+            const systemPrompt = buildSystemPrompt(platform, voice.description, capLenVal, titLenVal)
             const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform })
             newVariants[voice.id] = result.caption
             lastResult = result
@@ -137,7 +148,7 @@ export function GenerateTab() {
           assembledPost.value = ''
         } else {
           const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined
-          const systemPrompt = buildSystemPrompt(platform, voiceDesc)
+          const systemPrompt = buildSystemPrompt(platform, voiceDesc, capLenVal, titLenVal)
           const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform })
           generationResult.value = result
           editTitle.value = result.title
@@ -225,6 +236,75 @@ export function GenerateTab() {
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </select>
+        </div>
+      </div>
+
+      {/* ── Length Controls ── */}
+      <div class="section">
+        <div class="section-label">Content Length</div>
+
+        {/* Title length */}
+        <div class="length-control">
+          <div class="length-header">
+            <span class="length-label">Title</span>
+            <span class="length-value">{getTitleSpec(titLen).label}</span>
+          </div>
+          <div class="length-slider-row">
+            <input
+              type="range"
+              class="length-slider"
+              min="0"
+              max="5"
+              step="1"
+              value={[1, 2, 4, 6, 8, 0].indexOf(titLen)}
+              onInput={(e) => {
+                const steps: TitleLength[] = [1, 2, 4, 6, 8, 0]
+                titleLength.value = steps[parseInt((e.target as HTMLInputElement).value)]
+              }}
+            />
+            <div class="length-ticks">
+              <span>1w</span><span>2w</span><span>4w</span><span>6w</span><span>8w</span><span>∞</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Caption length */}
+        <div class="length-control">
+          <div class="length-header">
+            <span class="length-label">Caption</span>
+            <span class="length-value">{getLengthSpec(capLen).label}</span>
+          </div>
+          <div class="length-slider-row">
+            <input
+              type="range"
+              class="length-slider"
+              min="0"
+              max="4"
+              step="1"
+              value={[0.5, 1, 2, 3, 0].indexOf(capLen)}
+              onInput={(e) => {
+                const steps: CaptionLength[] = [0.5, 1, 2, 3, 0]
+                captionLength.value = steps[parseInt((e.target as HTMLInputElement).value)]
+              }}
+            />
+            <div class="length-ticks">
+              <span>½</span><span>1¶</span><span>2¶</span><span>3¶</span><span>∞</span>
+            </div>
+          </div>
+
+          {/* Budget readout */}
+          <div class="length-budget">
+            {capLen === 0 ? (
+              <span>Platform max: {platformMax.toLocaleString()} chars</span>
+            ) : (
+              <span>
+                ~{budget.toLocaleString()} of {platformMax.toLocaleString()} chars
+                {isTemplateMode && templateStatic > 0 && (
+                  <span style={{ color: 'var(--text3)' }}> ({templateStatic} static)</span>
+                )}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

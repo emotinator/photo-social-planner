@@ -158,7 +158,8 @@ export function TemplatesTab() {
       allTemplates.value = await loadAllTemplates()
       allSnippetSets.value = await loadAllSnippetSets()
       allCaptionVoices.value = await loadAllCaptionVoices()
-      showToast(`Imported ${counts.templates} templates, ${counts.snippetSets} sets, ${counts.voices} voices`, 'success')
+      const settingsNote = counts.settingsRestored ? ' + settings' : ''
+      showToast(`Imported ${counts.templates} templates, ${counts.snippetSets} sets, ${counts.voices} voices${settingsNote}`, 'success')
     } catch (err: any) {
       showToast(err.message || 'Import failed', 'error')
     }
