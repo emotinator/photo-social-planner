@@ -6,7 +6,7 @@ import {
   editTitle, editCaption, editHashtags,
   activeTab, showToast, editingDraftId,
   allTemplates, allSnippetSets, selectedTemplateId,
-  snippetSelections, assembledPost,
+  snippetSelections, snippetLLMContext, assembledPost,
   allCaptionVoices, selectedVoiceIds, voiceVariants, chosenVoiceId,
   captionLength, titleLength,
   type CaptionLength, type TitleLength,
@@ -56,6 +56,7 @@ export function GenerateTab() {
     chosenVoiceId.value = null
     editingDraftId.value = null
     snippetSelections.value = {}
+    snippetLLMContext.value = {}
     showToast('Workspace cleared', 'info')
   }, [])
 
@@ -101,7 +102,10 @@ export function GenerateTab() {
     try {
       const resized = await Promise.all(images.map((img: { blob: Blob }) => resizeForLLM(img.blob)))
       const platform = currentPlatform.value
-      const userPrompt = buildUserPrompt(currentNotes.value, images.length)
+      const llmSnippets = isTemplateMode
+        ? Object.fromEntries(Object.entries(snippetSelections.value).filter(([k]) => snippetLLMContext.value[k]))
+        : undefined
+      const userPrompt = buildUserPrompt(currentNotes.value, images.length, llmSnippets)
 
       // Determine which voices to generate for
       const activeVoices = selVoiceIds
@@ -263,6 +267,7 @@ export function GenerateTab() {
               const val = (e.target as HTMLSelectElement).value
               selectedTemplateId.value = val || null
               snippetSelections.value = {}
+              snippetLLMContext.value = {}
               assembledPost.value = ''
             }}
           >
@@ -394,9 +399,26 @@ export function GenerateTab() {
           <div class="section-label">Snippet Selections</div>
           {userFields.map((fieldName) => {
             const set = snippetSets.find((s: SnippetSet) => s.name === fieldName)
+            const sendToLLM = !!snippetLLMContext.value[fieldName]
             return (
               <div key={fieldName} class="field-row">
-                <div class="field-label">{fieldName}</div>
+                <div class="field-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{fieldName}</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", fontWeight: 400, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={sendToLLM}
+                      onChange={() => {
+                        snippetLLMContext.value = {
+                          ...snippetLLMContext.value,
+                          [fieldName]: !sendToLLM,
+                        }
+                      }}
+                      style={{ accentColor: 'var(--accent)' }}
+                    />
+                    Send to AI
+                  </label>
+                </div>
                 {set ? (
                   <select
                     value={snippetSelections.value[fieldName] || ''}

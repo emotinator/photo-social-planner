@@ -123,11 +123,21 @@ ${platform === 'linkedin' ? `- Professional tone, share industry insights
 Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.`
 }
 
-export function buildUserPrompt(notes: string, imageCount: number): string {
+export function buildUserPrompt(notes: string, imageCount: number, snippetSelections?: Record<string, string>): string {
   let prompt = `I'm sharing ${imageCount === 1 ? 'this photograph' : `these ${imageCount} photographs`}.`
 
   if (notes.trim()) {
     prompt += `\n\nHere are my notes about ${imageCount === 1 ? 'this image' : 'these images'}:\n${notes}`
+  }
+
+  if (snippetSelections) {
+    const entries = Object.entries(snippetSelections).filter(([, v]) => v)
+    if (entries.length > 0) {
+      prompt += '\n\nAdditional context from the user (incorporate naturally into the post):'
+      for (const [field, value] of entries) {
+        prompt += `\n- ${field}: ${value}`
+      }
+    }
   }
 
   prompt += '\n\nPlease analyze the image(s) and create a social media post draft.'

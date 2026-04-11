@@ -51,6 +51,7 @@ export const allTemplates = signal<PostTemplate[]>([])
 export const allSnippetSets = signal<SnippetSet[]>([])
 export const selectedTemplateId = signal<string | null>(null) // null = classic mode
 export const snippetSelections = signal<Record<string, string>>({})
+export const snippetLLMContext = signal<Record<string, boolean>>({})
 export const assembledPost = signal('')
 
 // Caption voice state
