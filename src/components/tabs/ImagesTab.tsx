@@ -126,7 +126,7 @@ export function ImagesTab() {
 
         {images.length === 0 && (
           <div style={{ fontSize: '13px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", padding: '8px 0' }}>
-            Drop images anywhere or click to browse
+            Drag images anywhere, or paste with {navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl'}+V
           </div>
         )}
       </div>

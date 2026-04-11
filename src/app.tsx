@@ -1,5 +1,5 @@
 import './styles/base.css'
-import { useCallback, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { Header } from './components/layout/Header'
 import { Sidebar } from './components/layout/Sidebar'
 import { Canvas } from './components/layout/Canvas'
@@ -81,6 +81,30 @@ export function App() {
     if (files.length > 0) handleFiles(files)
     input.value = ''
   }
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = Array.from(e.clipboardData?.items || [])
+      const imageFiles = items
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => {
+          const file = item.getAsFile()!
+          const ext = file.type.split('/')[1].replace('jpeg', 'jpg')
+          const renamed = new File([file], `pasted-${new Date().toISOString()}.${ext}`, {
+            type: file.type,
+          })
+          return renamed
+        })
+
+      if (imageFiles.length > 0) {
+        e.preventDefault()
+        handleFiles(imageFiles)
+      }
+    }
+
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [handleFiles])
 
   return (
     <div
