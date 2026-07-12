@@ -31,11 +31,11 @@ interface TitleSpec {
 }
 
 const TITLE_SPECS: Record<number, TitleSpec> = {
-  1: { label: '1 word', instruction: 'Write a single-word title — one powerful, evocative word.' },
-  2: { label: '2 words', instruction: 'Write a 2-word title — punchy and evocative, like a photo series name.' },
-  4: { label: '4 words', instruction: 'Write a 3-4 word title — concise and attention-grabbing.' },
-  6: { label: '6 words', instruction: 'Write a 5-6 word title — descriptive but tight.' },
-  8: { label: '8 words', instruction: 'Write a 7-8 word title — a short sentence that hooks the reader.' },
+  1: { label: 'Up to 1 word', instruction: 'Write a single-word title — one powerful, evocative word.' },
+  2: { label: 'Up to 2 words', instruction: 'Write a title of up to 2 words — punchy and evocative, like a photo series name. Fewer is fine.' },
+  4: { label: 'Up to 4 words', instruction: 'Write a title of at most 4 words — concise and attention-grabbing. Fewer is fine.' },
+  6: { label: 'Up to 6 words', instruction: 'Write a title of at most 6 words — descriptive but tight. Fewer is fine.' },
+  8: { label: 'Up to 8 words', instruction: 'Write a title of at most 8 words — a short phrase that hooks the reader. Fewer is fine.' },
   0: { label: 'No limit', instruction: 'Write a compelling title at whatever length best fits (max 60 characters).' },
 }
 
