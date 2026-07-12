@@ -110,6 +110,16 @@ export async function loadAllDrafts(): Promise<Draft[]> {
   return hydrated
 }
 
+/**
+ * Load draft records WITHOUT hydrating image blobs. The stored `drafts` objects
+ * keep title/caption/status/plannedDate but only image refs, so this is cheap
+ * for metadata-only needs (e.g. repetition analysis of the planned queue).
+ */
+export async function loadDraftsMeta(): Promise<Draft[]> {
+  const db = await getDB()
+  return db.getAll('drafts') as Promise<Draft[]>
+}
+
 export async function deleteDraft(id: string): Promise<void> {
   const db = await getDB()
 

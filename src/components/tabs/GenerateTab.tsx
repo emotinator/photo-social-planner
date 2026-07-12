@@ -12,8 +12,9 @@ import {
   type CaptionLength, type TitleLength,
 } from '../../store'
 import { getProvider, getAllProviders } from '../../providers/registry'
-import { resizeForLLM, loadAllCaptionVoices } from '../../store/storage'
+import { resizeForLLM, loadAllCaptionVoices, loadDraftsMeta } from '../../store/storage'
 import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt, getLengthSpec, calcCaptionBudget, getTitleSpec } from '../../utils/prompts'
+import { buildRepetitionContext } from '../../utils/repetition'
 import { extractLLMFields, extractUserFields, assembleTemplate, staticTextLength } from '../../utils/templateParser'
 import { useState, useEffect as useEffectAlias } from 'preact/hooks'
 import type { PostTemplate, SnippetSet, CaptionVoice } from '../../types'
@@ -105,7 +106,11 @@ export function GenerateTab() {
       const llmSnippets = isTemplateMode
         ? Object.fromEntries(Object.entries(snippetSelections.value).filter(([k]) => snippetLLMContext.value[k]))
         : undefined
-      const userPrompt = buildUserPrompt(currentNotes.value, images.length, llmSnippets)
+      // Load planned-post metadata fresh (no image blobs) so repetition context
+      // reflects the current queue even if the Plan tab was never opened.
+      const draftsMeta = (await loadDraftsMeta()).filter((d) => d.id !== editingDraftId.value)
+      const repetition = buildRepetitionContext(draftsMeta)
+      const userPrompt = buildUserPrompt(currentNotes.value, images.length, llmSnippets, repetition)
 
       // Determine which voices to generate for
       const activeVoices = selVoiceIds
