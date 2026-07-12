@@ -4,7 +4,7 @@ import {
   currentImages, currentNotes, currentPlatform,
   isGenerating, generationError, generationResult,
   editTitle, editCaption, editHashtags,
-  activeTab, showToast, editingDraftId,
+  showToast, editingDraftId,
   allTemplates, allSnippetSets, selectedTemplateId,
   snippetSelections, snippetLLMContext, assembledPost,
   allCaptionVoices, selectedVoiceIds, voiceVariants, chosenVoiceId,
