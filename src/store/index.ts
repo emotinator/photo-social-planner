@@ -84,6 +84,8 @@ export const providerConfigs = signal<Record<string, ProviderConfig>>({
 // Plan (saved drafts)
 export const savedDrafts = signal<Draft[]>([])
 export const editingDraftId = signal<string | null>(null)
+// When set, the Plan list scrolls the matching draft into view (requested from the grid preview)
+export const scrollToPlanDraftId = signal<string | null>(null)
 
 // Toast
 export interface ToastMsg {

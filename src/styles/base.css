@@ -51,7 +51,20 @@ header {
 .sidebar {
   width: var(--panel); background: var(--surface); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+  position: relative;
 }
+
+/* ── Scroll jump button (top ⇄ bottom) ── */
+.scroll-jump {
+  position: absolute; bottom: 16px; right: 16px; z-index: 20;
+  width: 40px; height: 40px; border-radius: 50%; border: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #fff; cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+  opacity: 0.9; transition: opacity 0.15s, transform 0.15s;
+}
+.scroll-jump:hover { opacity: 1; transform: translateY(-2px); }
+.scroll-jump .material-symbols-outlined { font-size: 22px; }
 .sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 
 .tab-btn {
@@ -242,18 +255,15 @@ select:focus { border-color: var(--accent); }
   position: relative;
 }
 .plan-item:hover { border-color: var(--accent); }
-.plan-item.dragging { opacity: 0.4; transform: scale(0.98); }
 .plan-item-active { border-color: var(--accent); background: var(--accent-dim); }
-.plan-item-drop-target { border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent-dim); }
+.plan-item-highlight { animation: plan-item-flash 1.4s ease-out; }
+@keyframes plan-item-flash {
+  0%, 60% { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
 .plan-item-header {
   display: flex; align-items: center; margin-bottom: 6px; gap: 6px;
 }
-.plan-drag-handle {
-  font-size: 16px; color: var(--text3); cursor: grab; flex-shrink: 0;
-  opacity: 0.4; transition: opacity 0.15s;
-}
-.plan-item:hover .plan-drag-handle { opacity: 1; color: var(--text2); }
-.plan-drag-handle:active { cursor: grabbing; }
 .plan-item-title {
   font-size: 14px; font-weight: 600; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;
@@ -364,6 +374,46 @@ select:focus { border-color: var(--accent); }
 .ig-caption .ig-username-inline { font-weight: 600; margin-right: 4px; }
 .ig-hashtags { color: #00376b; }
 [data-theme="light"] .ig-hashtags { color: #00376b; }
+
+/* ── Instagram Grid Preview ── */
+.ig-grid-wrap {
+  width: 100%; max-width: 935px; /* IG desktop max-width */
+  margin: 0 auto; padding: 20px 20px;
+  align-self: flex-start;
+  overflow-y: auto; max-height: 100%;
+}
+.ig-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px; /* IG uses 3px gap on desktop */
+}
+.ig-grid-cell {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--surface2);
+  cursor: pointer;
+}
+.ig-grid-cell:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ig-grid-cell img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ig-grid-placeholder {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 8px;
+  font-family: 'DM Mono', monospace;
+  color: var(--text3); font-size: 11px;
+  background: var(--surface2);
+  border: 1px dashed var(--border2);
+}
+.ig-grid-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 60px 20px;
+  font-size: 13px; color: var(--text3); font-family: 'DM Mono', monospace;
+}
 
 /* ── Connection Status ── */
 .connection-status {

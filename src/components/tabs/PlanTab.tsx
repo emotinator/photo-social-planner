@@ -1,11 +1,10 @@
-import { useEffect, useState, useCallback, useRef } from 'preact/hooks'
+import { useEffect, useState, useCallback } from 'preact/hooks'
 import {
   savedDrafts, currentImages, currentNotes, currentPlatform,
   editTitle, editCaption, editHashtags, generationResult,
-  activeTab, showToast, editingDraftId,
+  activeTab, showToast, editingDraftId, scrollToPlanDraftId,
   selectedProvider, selectedModel,
   assembledPost, selectedTemplateId, snippetSelections,
-  voiceVariants, chosenVoiceId, generationError,
 } from '../../store'
 import { saveDraft, loadAllDrafts, deleteDraft } from '../../store/storage'
 import { PLATFORMS } from '../../types'
@@ -34,14 +33,11 @@ function deriveTitle(): string {
 
 export function PlanTab() {
   const drafts = savedDrafts.value
+  const scrollTarget = scrollToPlanDraftId.value  // read during render so this component re-renders when it changes
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({})
+  const [highlightId, setHighlightId] = useState<string | null>(null)
   const hasContent = editCaption.value || editTitle.value || assembledPost.value || currentImages.value.length > 0
   const isEditing = !!editingDraftId.value
-
-  // Drag state
-  const [dragIdx, setDragIdx] = useState<number | null>(null)
-  const [overIdx, setOverIdx] = useState<number | null>(null)
-  const dragItemRef = useRef<HTMLDivElement | null>(null)
 
   // Load drafts on mount
   useEffect(() => {
@@ -63,6 +59,26 @@ export function PlanTab() {
     setThumbUrls(urls)
     return () => Object.values(urls).forEach(URL.revokeObjectURL)
   }, [drafts])
+
+  // Scroll a draft into view when requested from the grid preview, and briefly highlight it.
+  // Use an instant scroll: it completes synchronously (the highlight re-render can't cancel it,
+  // and smooth programmatic scrolling is unreliable across environments). The flash draws the eye.
+  useEffect(() => {
+    if (!scrollTarget) return
+    const el = document.querySelector(`.plan-item[data-draft-id="${scrollTarget}"]`) as HTMLElement | null
+    if (el) {
+      el.scrollIntoView({ block: 'center' })
+      setHighlightId(scrollTarget)
+    }
+    scrollToPlanDraftId.value = null
+  }, [scrollTarget])
+
+  // Clear the highlight after the flash animation finishes
+  useEffect(() => {
+    if (!highlightId) return
+    const t = setTimeout(() => setHighlightId(null), 1400)
+    return () => clearTimeout(t)
+  }, [highlightId])
 
   /** Build a draft object from the current workspace */
   const buildDraft = useCallback((id: string, existing?: Draft | null): Draft => {
@@ -88,7 +104,7 @@ export function PlanTab() {
           }
         : undefined,
       plannedDate: existing?.plannedDate,
-      planOrder: existing?.planOrder ?? sorted.length,
+      planOrder: existing?.planOrder,
       assembledPost: isTemplateMode ? assembledPost.value : undefined,
       templateId: selectedTemplateId.value || undefined,
       templateResolution: isTemplateMode && selectedTemplateId.value
@@ -124,15 +140,6 @@ export function PlanTab() {
     editingDraftId.value = draft.id
     showToast('Saved as new draft!', 'success')
   }, [drafts, buildDraft])
-
-  /** Quick save — overwrite if editing, otherwise save new */
-  const handleSave = useCallback(async () => {
-    if (isEditing) {
-      await handleOverwrite()
-    } else {
-      await handleSaveNew()
-    }
-  }, [isEditing, handleOverwrite, handleSaveNew])
 
   const handleDelete = async (id: string) => {
     await deleteDraft(id)
@@ -181,62 +188,10 @@ export function PlanTab() {
     savedDrafts.value = await loadAllDrafts()
   }
 
-  // ── Drag reorder ──
-  const handleDragStart = (e: DragEvent, idx: number) => {
-    setDragIdx(idx)
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move'
-      e.dataTransfer.setData('text/plain', String(idx))
-    }
-    const el = (e.target as HTMLElement).closest('.plan-item') as HTMLDivElement
-    if (el) {
-      dragItemRef.current = el
-      requestAnimationFrame(() => el.classList.add('dragging'))
-    }
-  }
-
-  const handleDragOver = (e: DragEvent, idx: number) => {
-    e.preventDefault()
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-    if (dragIdx !== null && idx !== dragIdx) {
-      setOverIdx(idx)
-    }
-  }
-
-  const handleDragEnd = () => {
-    if (dragItemRef.current) dragItemRef.current.classList.remove('dragging')
-    dragItemRef.current = null
-    setDragIdx(null)
-    setOverIdx(null)
-  }
-
-  const handleDrop = async (e: DragEvent, dropIdx: number) => {
-    e.preventDefault()
-    if (dragIdx === null || dragIdx === dropIdx) {
-      handleDragEnd()
-      return
-    }
-    const reordered = [...sorted]
-    const [moved] = reordered.splice(dragIdx, 1)
-    reordered.splice(dropIdx, 0, moved)
-    for (let i = 0; i < reordered.length; i++) {
-      const updated = { ...reordered[i], planOrder: i }
-      await saveDraft(updated)
-    }
-    savedDrafts.value = await loadAllDrafts()
-    handleDragEnd()
-    showToast('Order updated', 'info')
-  }
-
-  // Sort
+  // Sort by planned date, latest first; undated drafts sink to the bottom
+  // (ordered by most recently updated among themselves).
   const sorted = [...drafts].sort((a: Draft, b: Draft) => {
-    if (a.planOrder !== undefined && b.planOrder !== undefined) {
-      return a.planOrder - b.planOrder
-    }
-    const order: Record<string, number> = { planned: 0, draft: 1, posted: 2 }
-    const diff = order[a.status] - order[b.status]
-    if (diff !== 0) return diff
-    if (a.plannedDate && b.plannedDate) return a.plannedDate.localeCompare(b.plannedDate)
+    if (a.plannedDate && b.plannedDate) return b.plannedDate.localeCompare(a.plannedDate)
     if (a.plannedDate) return -1
     if (b.plannedDate) return 1
     return b.updatedAt.localeCompare(a.updatedAt)
@@ -285,31 +240,20 @@ export function PlanTab() {
           </div>
         ) : (
           <div class="plan-list">
-            {sorted.map((draft, idx) => {
+            {sorted.map((draft) => {
               const platformConfig = PLATFORMS[draft.platform]
               const icon = PLATFORM_ICONS[draft.platform]
               const isOverdue = draft.plannedDate && draft.plannedDate < today && draft.status !== 'posted'
               const isToday = draft.plannedDate === today
-              const isDragOver = overIdx === idx && dragIdx !== null && dragIdx !== idx
               const isActive = editingDraftId.value === draft.id
 
               return (
                 <div
                   key={draft.id}
-                  class={`plan-item ${isDragOver ? 'plan-item-drop-target' : ''} ${isActive ? 'plan-item-active' : ''}`}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, idx)}
-                  onDragOver={(e) => handleDragOver(e, idx)}
-                  onDragEnd={handleDragEnd}
-                  onDrop={(e) => handleDrop(e, idx)}
+                  data-draft-id={draft.id}
+                  class={`plan-item ${isActive ? 'plan-item-active' : ''} ${highlightId === draft.id ? 'plan-item-highlight' : ''}`}
                 >
                   <div class="plan-item-header">
-                    <span
-                      class="material-symbols-outlined plan-drag-handle"
-                      title="Drag to reorder"
-                    >
-                      drag_indicator
-                    </span>
                     <div class="plan-item-title">
                       {draft.title || 'Untitled Draft'}
                     </div>
