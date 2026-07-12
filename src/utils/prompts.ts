@@ -1,6 +1,7 @@
 import type { PlatformId } from '../types'
 import { PLATFORMS } from '../types'
 import type { CaptionLength, TitleLength } from '../store'
+import type { RepetitionContext } from './repetition'
 
 /* ── Length guidance ── */
 
@@ -123,7 +124,7 @@ ${platform === 'linkedin' ? `- Professional tone, share industry insights
 Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.`
 }
 
-export function buildUserPrompt(notes: string, imageCount: number, snippetSelections?: Record<string, string>): string {
+export function buildUserPrompt(notes: string, imageCount: number, snippetSelections?: Record<string, string>, repetition?: RepetitionContext): string {
   let prompt = `I'm sharing ${imageCount === 1 ? 'this photograph' : `these ${imageCount} photographs`}.`
 
   if (notes.trim()) {
@@ -137,6 +138,16 @@ export function buildUserPrompt(notes: string, imageCount: number, snippetSelect
       for (const [field, value] of entries) {
         prompt += `\n- ${field}: ${value}`
       }
+    }
+  }
+
+  if (repetition && (repetition.usedTitles.length > 0 || repetition.overusedTerms.length > 0)) {
+    prompt += '\n\nTo keep my upcoming posts feeling fresh and original (they should not read like variations of each other):'
+    if (repetition.usedTitles.length > 0) {
+      prompt += `\n- Do NOT reuse or closely echo these titles I've already used on planned posts: ${repetition.usedTitles.map((t) => `"${t}"`).join(', ')}`
+    }
+    if (repetition.overusedTerms.length > 0) {
+      prompt += `\n- These descriptive words are already appearing a lot across my planned posts — avoid them here and reach for fresh alternatives: ${repetition.overusedTerms.map((t) => t.word).join(', ')}`
     }
   }
 
