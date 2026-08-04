@@ -24,6 +24,10 @@ export interface Draft {
   templateFields: Record<string, string>
   notes: string
 
+  /** One alt text per image, in carousel order (Instagram sets alt per slide) */
+  altText?: string[]
+  threadsPost?: string
+
   generatedWith?: {
     provider: string
     model: string
@@ -98,6 +102,12 @@ export interface ModelInfo {
   size?: string
 }
 
+/** Optional extra outputs requested alongside the main caption, in the same LLM call */
+export interface ExtraOutputs {
+  altText?: boolean
+  threadsPost?: boolean
+}
+
 export interface GenerateRequest {
   model: string
   images: { base64: string; mimeType: string }[]
@@ -106,6 +116,9 @@ export interface GenerateRequest {
   platform: PlatformId
   templateFields?: TemplateField[]
   templateLLMFields?: { key: string }[]
+  extraOutputs?: ExtraOutputs
+  /** Number of images in the post — alt text returns one entry per image */
+  imageCount?: number
 }
 
 export interface GenerateResponse {
@@ -115,6 +128,9 @@ export interface GenerateResponse {
   templateFields: Record<string, string>
   llmFills?: Record<string, string>
   raw: string
+  /** One alt text per image, in carousel order */
+  altText?: string[]
+  threadsPost?: string
 }
 
 export interface ProviderConfig {

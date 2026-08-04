@@ -1,5 +1,6 @@
 import type { LLMProvider } from './types'
 import type { GenerateRequest, GenerateResponse, ModelInfo } from '../types'
+import { extraOutputProperties, normalizeExtras, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
 import { providerConfigs } from '../store'
 
 function getApiKey(): string {
@@ -70,6 +71,9 @@ export const anthropicProvider: LLMProvider = {
     // Add user text
     content.push({ type: 'text', text: req.userPrompt })
 
+    const imageCount = req.imageCount ?? req.images.length
+    const extraProps = extraOutputProperties(req.extraOutputs, imageCount)
+
     const res = await fetch('/api/anthropic/v1/messages', {
       method: 'POST',
       headers: {
@@ -79,7 +83,8 @@ export const anthropicProvider: LLMProvider = {
       },
       body: JSON.stringify({
         model: req.model,
-        max_tokens: 1024,
+        // Headroom for per-image alt text plus a Threads post on top of the caption
+        max_tokens: 2048,
         system: req.systemPrompt,
         messages: [{ role: 'user', content }],
         tools: [
@@ -89,10 +94,13 @@ export const anthropicProvider: LLMProvider = {
                 description: 'Fill template placeholders for a social media post',
                 input_schema: {
                   type: 'object',
-                  properties: Object.fromEntries(
-                    req.templateLLMFields.map((f) => [f.key, { type: 'string', description: `Value for the "${f.key}" placeholder` }])
-                  ),
-                  required: req.templateLLMFields.map((f) => f.key),
+                  properties: {
+                    ...Object.fromEntries(
+                      req.templateLLMFields.map((f) => [f.key, { type: 'string', description: `Value for the "${f.key}" placeholder` }])
+                    ),
+                    ...extraProps,
+                  },
+                  required: [...req.templateLLMFields.map((f) => f.key), ...Object.keys(extraProps)],
                 },
               }
             : {
@@ -108,8 +116,9 @@ export const anthropicProvider: LLMProvider = {
                       items: { type: 'string' },
                       description: 'Relevant hashtags without the # symbol',
                     },
+                    ...extraProps,
                   },
-                  required: ['title', 'caption', 'hashtags'],
+                  required: ['title', 'caption', 'hashtags', ...Object.keys(extraProps)],
                 },
               },
         ],
@@ -128,15 +137,23 @@ export const anthropicProvider: LLMProvider = {
     // Extract tool use result
     const toolUse = data.content?.find((c: any) => c.type === 'tool_use')
     if (toolUse?.input) {
+      const extras = normalizeExtras(toolUse.input, req.extraOutputs, imageCount)
+
       // Template mode: return all fills as llmFills
       if (req.templateLLMFields) {
+        // Extras share the tool input but are not template placeholders — keep them out of the fills
+        const fills = Object.fromEntries(
+          Object.entries(toolUse.input as Record<string, string>)
+            .filter(([k]) => !(EXTRA_OUTPUT_KEYS as readonly string[]).includes(k))
+        )
         return {
           title: '',
           caption: '',
           hashtags: [],
           templateFields: {},
-          llmFills: toolUse.input as Record<string, string>,
+          llmFills: fills,
           raw,
+          ...extras,
         }
       }
       return {
@@ -145,6 +162,7 @@ export const anthropicProvider: LLMProvider = {
         hashtags: (toolUse.input.hashtags || []).map((h: string) => h.replace(/^#/, '')),
         templateFields: {},
         raw,
+        ...extras,
       }
     }
 

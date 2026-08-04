@@ -1,4 +1,4 @@
-import type { PlatformId } from '../types'
+import type { PlatformId, ExtraOutputs } from '../types'
 import { PLATFORMS } from '../types'
 import type { CaptionLength, TitleLength } from '../store'
 import type { RepetitionContext } from './repetition'
@@ -61,7 +61,50 @@ function buildLengthInstruction(captionLen: CaptionLength, budgetChars?: number)
   return instruction
 }
 
-export function buildSystemPrompt(platform: PlatformId, voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6): string {
+/* ── Extra outputs (alt text, Threads post) ── */
+
+const THREADS_MAX = PLATFORMS.threads.captionMaxLength
+
+/**
+ * Describes the optional extra JSON keys the model should return alongside the
+ * main caption. Appended to both the classic and template system prompts —
+ * these outputs are independent of any post template.
+ */
+export function buildExtraOutputsInstruction(extras: ExtraOutputs | undefined, imageCount: number): string {
+  if (!extras || (!extras.altText && !extras.threadsPost)) return ''
+
+  let out = '\n\nADDITIONAL REQUIRED OUTPUT KEYS — include these in the same JSON object:'
+
+  if (extras.altText) {
+    out += `
+
+- "altText": An array of exactly ${imageCount} string${imageCount === 1 ? '' : 's'}, one per image in the order given.
+  Each entry is the Instagram alt text for that specific image. Alt text is read aloud by screen
+  readers AND used by Instagram to understand and surface the photo, so write it to serve both:
+  - Describe literally what is actually visible: subject, setting, action, light, colour, weather, time of day.
+  - Aim for about 125 characters. One sentence is usually right. Never exceed 200.
+  - Let searchable terms appear naturally because they are genuinely true of the photo — the location,
+    the subject, the genre, the technique. Do NOT bolt on keywords that do not describe the image.
+  - Never begin with "Image of", "Photo of", "A picture showing" or similar — start with the content itself.
+  - No hashtags, no emoji, no marketing language, no calls to action.
+  - Describe each image on its own terms. Do not write "the second image" or refer to the other slides.`
+  }
+
+  if (extras.threadsPost) {
+    out += `
+
+- "threadsPost": A standalone post for Threads about the same photograph.
+  Write it fresh for Threads — do NOT summarise or truncate the Instagram caption.
+  - Between 300 and ${THREADS_MAX} characters. Never exceed ${THREADS_MAX}.
+  - Conversational and direct, like talking to someone. Open with the thought, not a hook formula.
+  - No hashtag block and no title — Threads posts do not use them.
+  - Ending on an observation or a genuine question invites replies; do not force a call to action.`
+  }
+
+  return out
+}
+
+export function buildSystemPrompt(platform: PlatformId, voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, extras?: ExtraOutputs, imageCount: number = 1): string {
   const config = PLATFORMS[platform]
   const { budget } = calcCaptionBudget(platform, captionLen)
   const titleSpec = getTitleSpec(titleWords)
@@ -77,7 +120,7 @@ export function buildSystemPrompt(platform: PlatformId, voiceDescription?: strin
 You must respond with a JSON object containing:
 - "title": ${titleSpec.instruction}
 - "caption": The full caption text for ${config.name} (max ${config.captionMaxLength} characters). Write in a natural, engaging voice. Include line breaks for readability.
-- "hashtags": An array of relevant hashtags WITHOUT the # symbol (max ${config.hashtagLimit} hashtags)
+- "hashtags": An array of relevant hashtags WITHOUT the # symbol (max ${config.hashtagLimit} hashtags)${buildExtraOutputsInstruction(extras, imageCount)}
 
 Guidelines for ${config.name}:
 ${platform === 'instagram' ? `- Captions should be engaging, tell a story or share insight about the photo
@@ -93,7 +136,7 @@ ${platform === 'linkedin' ? `- Professional tone, share industry insights
 Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.`
 }
 
-export function buildTemplateSystemPrompt(platform: PlatformId, llmFields: { key: string }[], voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, templateStaticChars: number = 0): string {
+export function buildTemplateSystemPrompt(platform: PlatformId, llmFields: { key: string }[], voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, templateStaticChars: number = 0, extras?: ExtraOutputs, imageCount: number = 1): string {
   const config = PLATFORMS[platform]
   const { budget } = calcCaptionBudget(platform, captionLen, templateStaticChars)
   const titleSpec = getTitleSpec(titleWords)
@@ -111,7 +154,7 @@ export function buildTemplateSystemPrompt(platform: PlatformId, llmFields: { key
   return `You are a social media content expert specializing in photography posts. You are filling placeholders in a post template for ${config.name}.
 
 You must respond with a JSON object containing these fields:
-${fieldList}
+${fieldList}${buildExtraOutputsInstruction(extras, imageCount)}
 
 Guidelines for ${config.name}:
 ${platform === 'instagram' ? `- Captions should be engaging, tell a story or share insight about the photo
