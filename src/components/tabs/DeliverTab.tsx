@@ -3,8 +3,10 @@ import JSZip from 'jszip'
 import {
   currentImages, editTitle, editCaption, editHashtags,
   assembledPost, selectedTemplateId, showToast, activeTab,
+  editAltText, editThreadsPost,
 } from '../../store'
 import type { DraftImage } from '../../types'
+import { PLATFORMS } from '../../types'
 
 export function DeliverTab() {
   const images = currentImages.value
@@ -13,6 +15,8 @@ export function DeliverTab() {
   const hashtags = editHashtags.value
   const assembled = assembledPost.value
   const isTemplateMode = !!selectedTemplateId.value
+  const altText = editAltText.value
+  const threadsPost = editThreadsPost.value
 
   const postText = isTemplateMode ? assembled : caption
   const hashtagText = hashtags.length > 0 ? hashtags.map((h: string) => `#${h}`).join(' ') : ''
@@ -124,24 +128,41 @@ export function DeliverTab() {
             </button>
 
             <div class="deliver-image-list">
-              {images.map((img: DraftImage) => (
-                <div key={img.id} class="deliver-image-item">
-                  <div class="deliver-image-thumb">
-                    {thumbUrls[img.id] && <img src={thumbUrls[img.id]} alt={img.filename} />}
+              {images.map((img: DraftImage, i: number) => {
+                const alt = altText[i] || ''
+                return (
+                  <div key={img.id} class="deliver-image-item">
+                    <div class="deliver-image-thumb">
+                      {thumbUrls[img.id] && <img src={thumbUrls[img.id]} alt={img.filename} />}
+                    </div>
+                    <div class="deliver-image-info">
+                      <div class="deliver-image-name">{img.filename}</div>
+                      <div class="deliver-image-dims">{img.width} x {img.height}</div>
+                      {alt && (
+                        <div style={{ marginTop: '4px' }}>
+                          <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", whiteSpace: 'pre-wrap' }}>
+                            {alt}
+                          </div>
+                          <button
+                            class="deliver-copy-btn"
+                            style={{ marginTop: '2px' }}
+                            onClick={() => copyToClipboard(alt, `Alt text ${i + 1}`)}
+                          >
+                            {copiedField === `Alt text ${i + 1}` ? 'Copied!' : 'Copy alt text'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      class="btn btn-ghost btn-sm"
+                      onClick={() => downloadImage(img)}
+                      title="Download"
+                    >
+                      <span class="material-symbols-outlined" style={{ fontSize: '14px' }}>download</span>
+                    </button>
                   </div>
-                  <div class="deliver-image-info">
-                    <div class="deliver-image-name">{img.filename}</div>
-                    <div class="deliver-image-dims">{img.width} x {img.height}</div>
-                  </div>
-                  <button
-                    class="btn btn-ghost btn-sm"
-                    onClick={() => downloadImage(img)}
-                    title="Download"
-                  >
-                    <span class="material-symbols-outlined" style={{ fontSize: '14px' }}>download</span>
-                  </button>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </>
         )}
@@ -186,6 +207,35 @@ export function DeliverTab() {
           </div>
         </div>
       )}
+
+      {/* ── Threads post — already includes credits, edited on the Generate tab ── */}
+      {threadsPost && (() => {
+        const full = threadsPost
+        const over = full.length - PLATFORMS.threads.captionMaxLength
+        return (
+          <div class="section">
+            <div class="section-label">
+              Threads Post
+              <button
+                class="deliver-copy-btn"
+                onClick={() => copyToClipboard(full, 'Threads post')}
+              >
+                {copiedField === 'Threads post' ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <div class="deliver-text-preview">{full}</div>
+            <div style={{
+              marginTop: '4px', fontSize: '11px', fontFamily: "'DM Mono', monospace", textAlign: 'right',
+              color: over > 0 ? 'var(--red, #e5534b)' : 'var(--text3)',
+            }}>
+              {full.length} / {PLATFORMS.threads.captionMaxLength}
+              {over > 0
+                ? ` · over by ${over} — trim the text above`
+                : ` · ${-over} to spare`}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Full Post Copy ── */}
       {postText && (

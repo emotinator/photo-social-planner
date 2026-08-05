@@ -46,6 +46,32 @@ export const editTitle = signal('')
 export const editCaption = signal('')
 export const editHashtags = signal<string[]>([])
 
+// ── Extra outputs (opt-in, generated in the same call as the caption) ──
+export const enableAltText = signal(false)
+export const enableThreadsPost = signal(false)
+
+/** One alt text per image, index-aligned with currentImages */
+export const editAltText = signal<string[]>([])
+export const editThreadsPost = signal('')
+
+/**
+ * Credits appended below every Threads post. Its length is reserved out of the
+ * platform limit so the generated text leaves room for it.
+ */
+export const DEFAULT_THREADS_CREDITS = `.
+.
+.
+.
+In Frame @
+Agency @
+Shot by @elmererana.portraits
+Produced by @formodele
+Studio @_studioyyc`
+
+export const threadsCredits = signal<string>(
+  localStorage.getItem('psp-threads-credits') ?? DEFAULT_THREADS_CREDITS
+)
+
 // Template state
 export const allTemplates = signal<PostTemplate[]>([])
 export const allSnippetSets = signal<SnippetSet[]>([])
@@ -57,7 +83,13 @@ export const assembledPost = signal('')
 // Caption voice state
 export const allCaptionVoices = signal<CaptionVoice[]>([])
 export const selectedVoiceIds = signal<string[]>([])   // multi-select
-export const voiceVariants = signal<Record<string, string>>({})  // voiceId -> generated caption
+/** Everything one voice produced — `text` is the caption (classic) or assembled post (template) */
+export interface VoiceVariant {
+  text: string
+  altText?: string[]
+  threadsPost?: string
+}
+export const voiceVariants = signal<Record<string, VoiceVariant>>({})  // voiceId -> that voice's outputs
 export const chosenVoiceId = signal<string | null>(null)  // which variant user picked
 
 // Provider state
@@ -129,8 +161,15 @@ if (savedSettings) {
     if (s.captionLength !== undefined) captionLength.value = s.captionLength
     if (s.titleLength !== undefined) titleLength.value = s.titleLength
     if (s.templateId !== undefined) selectedTemplateId.value = s.templateId
+    if (s.enableAltText !== undefined) enableAltText.value = !!s.enableAltText
+    if (s.enableThreadsPost !== undefined) enableThreadsPost.value = !!s.enableThreadsPost
   } catch {}
 }
+
+// Threads credits block
+effect(() => {
+  localStorage.setItem('psp-threads-credits', threadsCredits.value)
+})
 
 // Auto-save generation settings
 effect(() => {
@@ -141,5 +180,7 @@ effect(() => {
     captionLength: captionLength.value,
     titleLength: titleLength.value,
     templateId: selectedTemplateId.value,
+    enableAltText: enableAltText.value,
+    enableThreadsPost: enableThreadsPost.value,
   }))
 })

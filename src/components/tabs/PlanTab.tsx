@@ -5,6 +5,7 @@ import {
   activeTab, showToast, editingDraftId, scrollToPlanDraftId,
   selectedProvider, selectedModel,
   assembledPost, selectedTemplateId, snippetSelections,
+  editAltText, editThreadsPost,
 } from '../../store'
 import { saveDraft, loadAllDrafts, deleteDraft } from '../../store/storage'
 import { PLATFORMS } from '../../types'
@@ -96,6 +97,9 @@ export function PlanTab() {
       hashtags: isTemplateMode ? [] : editHashtags.value,
       templateFields: {},
       notes: currentNotes.value,
+      // Extra outputs — only persisted when something was actually generated
+      altText: editAltText.value.some((t: string) => t) ? [...editAltText.value] : undefined,
+      threadsPost: editThreadsPost.value || undefined,
       generatedWith: generationResult.value
         ? {
             provider: selectedProvider.value,
@@ -155,6 +159,8 @@ export function PlanTab() {
     editTitle.value = draft.title
     editCaption.value = draft.caption
     editHashtags.value = draft.hashtags
+    editAltText.value = draft.altText || []
+    editThreadsPost.value = draft.threadsPost || ''
     editingDraftId.value = draft.id
 
     // Restore template state

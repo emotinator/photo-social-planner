@@ -1,6 +1,7 @@
 import type { LLMProvider } from './types'
 import type { GenerateRequest, GenerateResponse, ModelInfo } from '../types'
 import { providerConfigs } from '../store'
+import { normalizeExtras, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
 
 const VISION_MODELS = ['gemma4', 'gemma3', 'llava', 'llava-llama3', 'llama3.2-vision', 'moondream', 'qwen2.5-vl']
 
@@ -76,20 +77,28 @@ export const ollamaProvider: LLMProvider = {
     const data = await res.json()
     const raw = data.message?.content || ''
 
+    const imageCount = req.imageCount ?? req.images.length
+
     // Template mode: extract all keys as llmFills
     if (req.templateLLMFields) {
-      return parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key))
+      return parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imageCount)
     }
 
-    return parseResponse(raw)
+    return parseResponse(raw, req.extraOutputs, imageCount)
   },
 }
 
-function parseTemplateResponse(raw: string, expectedKeys: string[]): GenerateResponse {
+function parseTemplateResponse(
+  raw: string,
+  expectedKeys: string[],
+  extras?: GenerateRequest['extraOutputs'],
+  imageCount: number = 1
+): GenerateResponse {
   try {
     const parsed = JSON.parse(raw)
     const llmFills: Record<string, string> = {}
     for (const key of expectedKeys) {
+      if ((EXTRA_OUTPUT_KEYS as readonly string[]).includes(key)) continue
       llmFills[key] = String(parsed[key] || '')
     }
     return {
@@ -99,6 +108,7 @@ function parseTemplateResponse(raw: string, expectedKeys: string[]): GenerateRes
       templateFields: {},
       llmFills,
       raw,
+      ...normalizeExtras(parsed, extras, imageCount),
     }
   } catch {
     return {
@@ -112,7 +122,11 @@ function parseTemplateResponse(raw: string, expectedKeys: string[]): GenerateRes
   }
 }
 
-function parseResponse(raw: string): GenerateResponse {
+function parseResponse(
+  raw: string,
+  extras?: GenerateRequest['extraOutputs'],
+  imageCount: number = 1
+): GenerateResponse {
   try {
     const parsed = JSON.parse(raw)
     return {
@@ -121,6 +135,7 @@ function parseResponse(raw: string): GenerateResponse {
       hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags.map((h: string) => h.replace(/^#/, '')) : [],
       templateFields: parsed.templateFields || {},
       raw,
+      ...normalizeExtras(parsed, extras, imageCount),
     }
   } catch {
     // Fallback: try to extract from text

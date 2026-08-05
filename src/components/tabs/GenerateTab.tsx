@@ -9,15 +9,30 @@ import {
   snippetSelections, snippetLLMContext, assembledPost,
   allCaptionVoices, selectedVoiceIds, voiceVariants, chosenVoiceId,
   captionLength, titleLength,
-  type CaptionLength, type TitleLength,
+  enableAltText, enableThreadsPost, editAltText, editThreadsPost, threadsCredits,
+  type CaptionLength, type TitleLength, type VoiceVariant,
 } from '../../store'
 import { getProvider, getAllProviders } from '../../providers/registry'
 import { resizeForLLM, loadAllCaptionVoices, loadDraftsMeta } from '../../store/storage'
-import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt, getLengthSpec, calcCaptionBudget, getTitleSpec } from '../../utils/prompts'
+import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt, getLengthSpec, calcCaptionBudget, getTitleSpec, calcThreadsBudget } from '../../utils/prompts'
 import { buildRepetitionContext } from '../../utils/repetition'
 import { extractLLMFields, extractUserFields, assembleTemplate, staticTextLength } from '../../utils/templateParser'
 import { useState, useEffect as useEffectAlias } from 'preact/hooks'
 import type { PostTemplate, SnippetSet, CaptionVoice } from '../../types'
+import { PLATFORMS } from '../../types'
+
+/**
+ * Copy a result's extra outputs into the editable fields (used on generate and on
+ * voice switch). The credits block is appended here so the Threads field holds the
+ * complete post — the credits and their @handles are then editable like any other text.
+ */
+function applyVariantExtras(src: { altText?: string[]; threadsPost?: string }) {
+  if (src.altText) editAltText.value = src.altText
+  if (src.threadsPost !== undefined) {
+    const credits = threadsCredits.value.trim()
+    editThreadsPost.value = credits ? `${src.threadsPost}\n${credits}` : src.threadsPost
+  }
+}
 
 export function GenerateTab() {
   const provider = selectedProvider.value
@@ -27,6 +42,7 @@ export function GenerateTab() {
   const generating = isGenerating.value
   const error = generationError.value
   const [newHashtag, setNewHashtag] = useState('')
+  const [outputTab, setOutputTab] = useState<'post' | 'alt' | 'threads'>('post')
 
   const templates = allTemplates.value
   const snippetSets = allSnippetSets.value
@@ -44,12 +60,45 @@ export function GenerateTab() {
   const hasResult = !!(editCaption.value || assembledPost.value)
   const isEditing = !!editingDraftId.value
 
+  // ── Output tabs ──
+  // Only the outputs that actually got generated are offered. Warnings live on the
+  // tab badges so an over-limit post isn't hidden behind an unselected tab.
+  const altList = editAltText.value.slice(0, images.length)
+  const hasAlt = altList.some((t: string) => t)
+  const hasThreads = !!editThreadsPost.value
+  const threadsOver = editThreadsPost.value.length > PLATFORMS.threads.captionMaxLength
+  const altOver = altList.some((t: string) => t.length > 200)
+
+  const outputTabs = [
+    hasResult && { id: 'post' as const, label: isTemplateMode ? 'Assembled' : 'Post' },
+    hasAlt && {
+      id: 'alt' as const,
+      label: 'Alt Text',
+      badge: String(altList.filter((t: string) => t).length),
+      warn: altOver,
+    },
+    hasThreads && {
+      id: 'threads' as const,
+      label: 'Threads',
+      badge: String(editThreadsPost.value.length),
+      warn: threadsOver,
+    },
+  ].filter(Boolean) as { id: 'post' | 'alt' | 'threads'; label: string; badge?: string; warn?: boolean }[]
+
+  // Fall back to the first available tab if the selected one no longer exists
+  const activeOutput = outputTabs.some((t) => t.id === outputTab)
+    ? outputTab
+    : outputTabs[0]?.id ?? 'post'
+  const showOutputTabs = outputTabs.length > 1
+
   const handleNewPost = useCallback(() => {
     currentImages.value = []
     currentNotes.value = ''
     editTitle.value = ''
     editCaption.value = ''
     editHashtags.value = []
+    editAltText.value = []
+    editThreadsPost.value = ''
     assembledPost.value = ''
     generationResult.value = null
     generationError.value = null
@@ -122,6 +171,22 @@ export function GenerateTab() {
       const titLenVal = titleLength.value
       const tmplStatic = activeTemplate ? staticTextLength(activeTemplate.body) : 0
 
+      // Extra outputs ride along in the same call. A separate Threads post is
+      // meaningless when the post itself is already for Threads.
+      const wantAlt = enableAltText.value
+      const wantThreads = enableThreadsPost.value && platform !== 'threads'
+      const extraOutputs = wantAlt || wantThreads
+        ? { altText: wantAlt, threadsPost: wantThreads }
+        : undefined
+      const imageCount = images.length
+      // Reserve the credits block out of the Threads limit before asking for text
+      const threadsBudget = calcThreadsBudget(threadsCredits.value)
+
+      // Clear previous extras so a run with a box unticked doesn't leave stale
+      // text on screen — or silently save it onto the draft
+      editAltText.value = []
+      editThreadsPost.value = ''
+
       if (isTemplateMode && activeTemplate) {
         // Template mode
         const llmFieldKeys = extractLLMFields(activeTemplate.body)
@@ -129,27 +194,33 @@ export function GenerateTab() {
 
         if (hasMultipleVoices) {
           // Generate one variant per voice
-          const newVariants: Record<string, string> = {}
+          const newVariants: Record<string, VoiceVariant> = {}
           for (const voice of activeVoices) {
-            const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voice.description, capLenVal, titLenVal, tmplStatic)
-            const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields })
+            const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voice.description, capLenVal, titLenVal, tmplStatic, extraOutputs, imageCount, threadsBudget)
+            const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
             const fills = result.llmFills || {}
-            newVariants[voice.id] = assembleTemplate(activeTemplate.body, fills, snippetSelections.value)
+            newVariants[voice.id] = {
+              text: assembleTemplate(activeTemplate.body, fills, snippetSelections.value),
+              altText: result.altText,
+              threadsPost: result.threadsPost,
+            }
           }
           voiceVariants.value = newVariants
           // Auto-select the first
           const firstId = activeVoices[0].id
           chosenVoiceId.value = firstId
-          assembledPost.value = newVariants[firstId]
+          assembledPost.value = newVariants[firstId].text
+          applyVariantExtras(newVariants[firstId])
           generationResult.value = null
         } else {
           // Single voice or no voice
           const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined
-          const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voiceDesc, capLenVal, titLenVal, tmplStatic)
-          const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields })
+          const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voiceDesc, capLenVal, titLenVal, tmplStatic, extraOutputs, imageCount, threadsBudget)
+          const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
           generationResult.value = result
           const fills = result.llmFills || {}
           assembledPost.value = assembleTemplate(activeTemplate.body, fills, snippetSelections.value)
+          applyVariantExtras(result)
         }
 
         editTitle.value = ''
@@ -159,30 +230,36 @@ export function GenerateTab() {
         // Classic mode
         if (hasMultipleVoices) {
           // Generate variant per voice — store caption variants
-          const newVariants: Record<string, string> = {}
+          const newVariants: Record<string, VoiceVariant> = {}
           let lastResult = null
           for (const voice of activeVoices) {
-            const systemPrompt = buildSystemPrompt(platform, voice.description, capLenVal, titLenVal)
-            const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform })
-            newVariants[voice.id] = result.caption
+            const systemPrompt = buildSystemPrompt(platform, voice.description, capLenVal, titLenVal, extraOutputs, imageCount, threadsBudget)
+            const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
+            newVariants[voice.id] = {
+              text: result.caption,
+              altText: result.altText,
+              threadsPost: result.threadsPost,
+            }
             lastResult = result
           }
           voiceVariants.value = newVariants
           const firstId = activeVoices[0].id
           chosenVoiceId.value = firstId
-          editCaption.value = newVariants[firstId]
+          editCaption.value = newVariants[firstId].text
+          applyVariantExtras(newVariants[firstId])
           editTitle.value = lastResult?.title || ''
           editHashtags.value = lastResult?.hashtags || []
           generationResult.value = lastResult
           assembledPost.value = ''
         } else {
           const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined
-          const systemPrompt = buildSystemPrompt(platform, voiceDesc, capLenVal, titLenVal)
-          const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform })
+          const systemPrompt = buildSystemPrompt(platform, voiceDesc, capLenVal, titLenVal, extraOutputs, imageCount, threadsBudget)
+          const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
           generationResult.value = result
           editTitle.value = result.title
           editCaption.value = result.caption
           editHashtags.value = result.hashtags
+          applyVariantExtras(result)
           assembledPost.value = ''
         }
       }
@@ -353,6 +430,46 @@ export function GenerateTab() {
         </div>
       </div>
 
+      {/* ── Extra Outputs ── */}
+      <div class="section">
+        <div class="section-label">Extra Outputs</div>
+        <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginBottom: '8px' }}>
+          Generated in the same request — no extra wait.
+        </div>
+
+        <label class="template-list-item" style={{ cursor: 'pointer', marginBottom: '4px' }}>
+          <input
+            type="checkbox"
+            checked={enableAltText.value}
+            onChange={(e) => (enableAltText.value = (e.target as HTMLInputElement).checked)}
+            style={{ accentColor: 'var(--accent)', marginRight: '6px' }}
+          />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Alt text</div>
+            <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginTop: '3px' }}>
+              One per image{images.length > 1 ? ` (${images.length} slides)` : ''} · accessibility + search
+            </div>
+          </div>
+        </label>
+
+        {currentPlatform.value !== 'threads' && (
+          <label class="template-list-item" style={{ cursor: 'pointer', marginBottom: 0 }}>
+            <input
+              type="checkbox"
+              checked={enableThreadsPost.value}
+              onChange={(e) => (enableThreadsPost.value = (e.target as HTMLInputElement).checked)}
+              style={{ accentColor: 'var(--accent)', marginRight: '6px' }}
+            />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Threads post</div>
+              <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginTop: '3px' }}>
+                Written natively · 300–{PLATFORMS.threads.captionMaxLength} chars, no hashtags
+              </div>
+            </div>
+          </label>
+        )}
+      </div>
+
       {/* Voice selector (multi-select) */}
       {voices.length > 0 && (
         <div class="section">
@@ -481,7 +598,8 @@ export function GenerateTab() {
         <div class="section">
           <div class="section-label">Voice Variants</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {Object.entries(variants).map(([voiceId, text]) => {
+            {Object.entries(variants).map(([voiceId, variant]) => {
+              const text = (variant as VoiceVariant).text
               const voice = voices.find((v: CaptionVoice) => v.id === voiceId)
               const isChosen = pickedVoice === voiceId
               return (
@@ -500,6 +618,8 @@ export function GenerateTab() {
                     } else {
                       editCaption.value = text
                     }
+                    // Keep the extras in step with the chosen voice
+                    applyVariantExtras(variant as VoiceVariant)
                   }}
                 >
                   <div style={{ flex: 1 }}>
@@ -522,8 +642,28 @@ export function GenerateTab() {
         </div>
       )}
 
+      {/* Output tab strip — only when there's more than one output to switch between */}
+      {showOutputTabs && (
+        <div class="section" style={{ paddingBottom: 0 }}>
+          <div class="output-tabs">
+            {outputTabs.map((t) => (
+              <button
+                key={t.id}
+                class={`output-tab ${activeOutput === t.id ? 'active' : ''}`}
+                onClick={() => setOutputTab(t.id)}
+              >
+                {t.label}
+                {t.badge && (
+                  <span class={`output-tab-badge ${t.warn ? 'warn' : ''}`}>{t.badge}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Template mode: single assembled post textarea */}
-      {isTemplateMode && assembledPost.value && (
+      {activeOutput === 'post' && isTemplateMode && assembledPost.value && (
         <div class="section">
           <div class="section-label">Assembled Post</div>
           <div class="result-field">
@@ -541,7 +681,7 @@ export function GenerateTab() {
       )}
 
       {/* Classic mode: title/caption/hashtags */}
-      {!isTemplateMode && editCaption.value && (
+      {activeOutput === 'post' && !isTemplateMode && editCaption.value && (
         <>
           <div class="section">
             <div class="section-label">Title</div>
@@ -592,6 +732,71 @@ export function GenerateTab() {
             </div>
           </div>
         </>
+      )}
+
+      {/* ── Alt text (one per image) ── */}
+      {activeOutput === 'alt' && hasAlt && (
+        <div class="section">
+          <div class="section-label">Alt Text</div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginBottom: '8px' }}>
+            Paste into Instagram under Advanced settings → Write alt text.
+          </div>
+          {editAltText.value.slice(0, images.length).map((alt: string, i: number) => (
+            <div key={i} class="result-field" style={{ marginBottom: '8px' }}>
+              {images.length > 1 && (
+                <div style={{ fontSize: '11px', color: 'var(--text2)', fontFamily: "'DM Mono', monospace", marginBottom: '3px' }}>
+                  Slide {i + 1} of {images.length}
+                </div>
+              )}
+              <textarea
+                rows={2}
+                value={alt}
+                placeholder="Alt text for this image..."
+                onInput={(e) => {
+                  const next = [...editAltText.value]
+                  next[i] = (e.target as HTMLTextAreaElement).value
+                  editAltText.value = next
+                }}
+              />
+              <div style={{
+                marginTop: '4px', fontSize: '11px', fontFamily: "'DM Mono', monospace", textAlign: 'right',
+                color: alt.length > 200 ? 'var(--red, #e5534b)' : 'var(--text3)',
+              }}>
+                {alt.length} chars {alt.length > 200 ? '· over 200, trim it' : '· aim ~125'}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Threads post (includes the credits block, all editable) ── */}
+      {activeOutput === 'threads' && hasThreads && (
+        <div class="section">
+          <div class="section-label">Threads Post</div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginBottom: '8px' }}>
+            Credits included below — fill in the In Frame and Agency handles here.
+          </div>
+          <div class="result-field">
+            <textarea
+              rows={14}
+              value={editThreadsPost.value}
+              onInput={(e) => (editThreadsPost.value = (e.target as HTMLTextAreaElement).value)}
+            />
+            {(() => {
+              const total = editThreadsPost.value.length
+              const over = total - PLATFORMS.threads.captionMaxLength
+              return (
+                <div style={{
+                  marginTop: '4px', fontSize: '11px', fontFamily: "'DM Mono', monospace",
+                  textAlign: 'right', color: over > 0 ? 'var(--red, #e5534b)' : 'var(--text3)',
+                }}>
+                  {total} / {PLATFORMS.threads.captionMaxLength}
+                  {over > 0 ? ` · over by ${over}` : ` · ${-over} to spare`}
+                </div>
+              )
+            })()}
+          </div>
+        </div>
       )}
     </>
   )

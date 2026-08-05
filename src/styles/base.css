@@ -78,6 +78,29 @@ header {
 
 .tab-panel { display: none; flex-direction: column; overflow-y: auto; flex: 1; }
 .tab-panel.active { display: flex; }
+
+/* Nested tab strip for switching between generated outputs — same visual
+   language as .tab-btn, scaled down to sit inside a section. */
+.output-tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+
+.output-tab {
+  flex: 1; padding: 8px 4px; background: none; border: none; color: var(--text3);
+  font-family: 'Montserrat', sans-serif; font-size: 10px; font-weight: 300;
+  letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;
+  transition: all 0.15s; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+.output-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 900; }
+.output-tab:hover:not(.active) { color: var(--text2); }
+
+/* Count / status pill on an output tab */
+.output-tab-badge {
+  font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 400;
+  letter-spacing: 0; padding: 1px 4px; border-radius: 3px;
+  background: var(--border); color: var(--text3);
+}
+.output-tab.active .output-tab-badge { background: var(--accent-dim); color: var(--accent); }
+.output-tab-badge.warn { background: rgba(229, 83, 75, 0.18); color: var(--red, #e5534b); }
 /* ── Scrollbars (theme-aware) ── */
 * { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
 *::-webkit-scrollbar { width: 6px; height: 6px; }
