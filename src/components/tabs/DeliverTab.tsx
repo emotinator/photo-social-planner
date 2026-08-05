@@ -208,27 +208,34 @@ export function DeliverTab() {
         </div>
       )}
 
-      {/* ── Threads post ── */}
-      {threadsPost && (
-        <div class="section">
-          <div class="section-label">
-            Threads Post
-            <button
-              class="deliver-copy-btn"
-              onClick={() => copyToClipboard(threadsPost, 'Threads post')}
-            >
-              {copiedField === 'Threads post' ? 'Copied!' : 'Copy'}
-            </button>
+      {/* ── Threads post — already includes credits, edited on the Generate tab ── */}
+      {threadsPost && (() => {
+        const full = threadsPost
+        const over = full.length - PLATFORMS.threads.captionMaxLength
+        return (
+          <div class="section">
+            <div class="section-label">
+              Threads Post
+              <button
+                class="deliver-copy-btn"
+                onClick={() => copyToClipboard(full, 'Threads post')}
+              >
+                {copiedField === 'Threads post' ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <div class="deliver-text-preview">{full}</div>
+            <div style={{
+              marginTop: '4px', fontSize: '11px', fontFamily: "'DM Mono', monospace", textAlign: 'right',
+              color: over > 0 ? 'var(--red, #e5534b)' : 'var(--text3)',
+            }}>
+              {full.length} / {PLATFORMS.threads.captionMaxLength}
+              {over > 0
+                ? ` · over by ${over} — trim the text above`
+                : ` · ${-over} to spare`}
+            </div>
           </div>
-          <div class="deliver-text-preview">{threadsPost}</div>
-          <div style={{
-            marginTop: '4px', fontSize: '11px', fontFamily: "'DM Mono', monospace", textAlign: 'right',
-            color: threadsPost.length > PLATFORMS.threads.captionMaxLength ? 'var(--red, #e5534b)' : 'var(--text3)',
-          }}>
-            {threadsPost.length} / {PLATFORMS.threads.captionMaxLength}
-          </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* ── Full Post Copy ── */}
       {postText && (

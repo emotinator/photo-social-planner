@@ -2,7 +2,11 @@ import type { ExtraOutputs } from '../types'
 import { PLATFORMS } from '../types'
 
 /** JSON-schema fragments for the optional extra outputs, used by schema-capable providers. */
-export function extraOutputProperties(extras: ExtraOutputs | undefined, imageCount: number): Record<string, any> {
+export function extraOutputProperties(
+  extras: ExtraOutputs | undefined,
+  imageCount: number,
+  threadsBudget?: number
+): Record<string, any> {
   if (!extras) return {}
   const props: Record<string, any> = {}
 
@@ -17,9 +21,10 @@ export function extraOutputProperties(extras: ExtraOutputs | undefined, imageCou
   }
 
   if (extras.threadsPost) {
+    const max = threadsBudget ?? PLATFORMS.threads.captionMaxLength
     props.threadsPost = {
       type: 'string',
-      description: `A standalone Threads post about the same photograph, 300-${PLATFORMS.threads.captionMaxLength} characters, conversational, no hashtags or title.`,
+      description: `A standalone Threads post about the same photograph. STRICT maximum ${max} characters — a credits block is appended below it afterwards. Conversational, no hashtags, no title, no @mentions.`,
     }
   }
 

@@ -20,6 +20,9 @@ Each is opt-in via a checkbox, so you can request them together with the caption
 | Alt text style | Descriptive-first, natural keywords | Alt text is both a screen-reader description and a content signal. Keyword-stuffing degrades the former and reads as spam. Searchable terms are included only where genuinely true of the photo. |
 | Threads style | Written independently, fixed 300–500 char spec | A condensed Instagram caption reads as a truncated crosspost. No new slider — the existing caption/title sliders stay Instagram-only. |
 | Carousels | One alt text per image, array in slide order | Instagram sets alt per slide. The model already receives all images in order, so this costs nothing extra. |
+| Threads length | Credits block reserved out of the 500, target given in words | A first trial overshot 500 by 47 characters. Models cannot count characters reliably, so the target is expressed in words with a safety margin held back. |
+| Credits block | Editable in Settings, appended at generation time | Appending at generation puts the whole post — text plus credits — in one editable field, so the per-post `In Frame` / `Agency` handles are edited where everything else is edited. |
+| Result layout | Nested tab strip: Post / Alt Text / Threads | Three stacked outputs make the panel long. Tabs appear only when more than one output exists. |
 
 ## Implementation
 
@@ -36,7 +39,9 @@ Each is opt-in via a checkbox, so you can request them together with the caption
 
 **Store** — `enableAltText` / `enableThreadsPost` (persisted in `psp-gen-settings`), `editAltText` / `editThreadsPost` as editable results. `voiceVariants` changed from `Record<voiceId, string>` to `Record<voiceId, VoiceVariant>` so each voice carries its own extras; picking a voice now swaps caption *and* extras together.
 
-**UI** — "Extra Outputs" checkbox section in Generate; editable alt-text rows (per slide, with a ~125-char guide) and a Threads textarea with a 500-char counter. Deliver shows alt text with a copy button beside each thumbnail, plus a Threads copy block. Plan saves and restores both fields.
+**Threads budget** (`calcThreadsBudget`) — reserves the credits block length plus a 60-character safety margin out of the 500, then states the remainder to the model as a word count (~52 words for the default block). The margin absorbs both model overshoot and the per-post handles typed into the `In Frame` / `Agency` slots, which the stored block cannot know about.
+
+**UI** — "Extra Outputs" checkbox section in Generate. Results sit behind a nested tab strip (Post / Alt Text / Threads) that appears only when more than one output exists; each tab carries a badge showing its count or length, turning red when over limit so a problem is never hidden behind an unselected tab. The Threads field holds the complete post including credits, so the handles are editable there. Settings holds the credits block with a live budget readout and detects zero-width characters that would silently consume the limit. Deliver shows alt text beside each thumbnail with a copy button, plus a Threads copy block. Plan saves and restores both fields.
 
 ## Known limitations
 
@@ -45,6 +50,10 @@ Each is opt-in via a checkbox, so you can request them together with the caption
 - Small local models ignore the JSON schema, so alt text quality on `gemma4:e4b` is best-effort; `normalizeExtras` keeps malformed output from breaking the run.
 - Threads posts do not feed the repetition context — that still tracks titles and captions only.
 
-## Not verified
+## Verification
 
-The build typechecks and compiles. Prompt quality, alt-text usefulness, and Threads tone are unverified against a real model — that is what this branch is for.
+Tried hands-on against a local Ollama model: outputs generate, the Threads length overshoot was found and fixed this way, and the editing flow was reworked in response.
+
+Not verified: Threads length compliance across repeated runs. A compliance harness was written and started, then killed because it was competing for the GPU with live testing. The live character counter is the backstop.
+
+Incidental finding while benchmarking on an M4 Max: `gemma4:26b` runs at 65.8 tok/s versus `e4b` at 61.0 and `31b` at 16.3, making 26b both the fastest and the strongest of the three. Forcing `num_ctx: 8192` changed throughput by under 1% and was not adopted.

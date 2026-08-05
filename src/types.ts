@@ -119,6 +119,8 @@ export interface GenerateRequest {
   extraOutputs?: ExtraOutputs
   /** Number of images in the post — alt text returns one entry per image */
   imageCount?: number
+  /** Character ceiling for the Threads post, after reserving the credits block */
+  threadsBudget?: number
 }
 
 export interface GenerateResponse {

@@ -66,11 +66,38 @@ function buildLengthInstruction(captionLen: CaptionLength, budgetChars?: number)
 const THREADS_MAX = PLATFORMS.threads.captionMaxLength
 
 /**
+ * Models cannot count characters reliably — asking for "max 500" reliably
+ * overshoots. We reserve the credits block, hold back a safety margin, and
+ * state the target in words, which models track far better.
+ */
+const THREADS_SAFETY_MARGIN = 60
+const CHARS_PER_WORD = 6.5
+
+export interface ThreadsBudget {
+  /** Characters the generated text may use */
+  budget: number
+  /** Roughly equivalent word count — the number actually given to the model */
+  words: number
+  /** Characters consumed by the credits block, including its separating newline */
+  reserved: number
+}
+
+export function calcThreadsBudget(credits: string): ThreadsBudget {
+  const reserved = credits.trim() ? credits.length + 1 : 0
+  const budget = Math.max(80, THREADS_MAX - reserved - THREADS_SAFETY_MARGIN)
+  return { budget, words: Math.round(budget / CHARS_PER_WORD), reserved }
+}
+
+/**
  * Describes the optional extra JSON keys the model should return alongside the
  * main caption. Appended to both the classic and template system prompts —
  * these outputs are independent of any post template.
  */
-export function buildExtraOutputsInstruction(extras: ExtraOutputs | undefined, imageCount: number): string {
+export function buildExtraOutputsInstruction(
+  extras: ExtraOutputs | undefined,
+  imageCount: number,
+  threads?: ThreadsBudget
+): string {
   if (!extras || (!extras.altText && !extras.threadsPost)) return ''
 
   let out = '\n\nADDITIONAL REQUIRED OUTPUT KEYS — include these in the same JSON object:'
@@ -91,20 +118,23 @@ export function buildExtraOutputsInstruction(extras: ExtraOutputs | undefined, i
   }
 
   if (extras.threadsPost) {
+    const b = threads ?? calcThreadsBudget('')
     out += `
 
 - "threadsPost": A standalone post for Threads about the same photograph.
   Write it fresh for Threads — do NOT summarise or truncate the Instagram caption.
-  - Between 300 and ${THREADS_MAX} characters. Never exceed ${THREADS_MAX}.
+  - LENGTH IS STRICT: write about ${b.words} words. Absolute maximum ${b.budget} characters.
+    A credits block is appended below your text afterwards, so the space you are given
+    is all you get. Coming in 20% short is fine; going over is not — if in doubt, write less.
   - Conversational and direct, like talking to someone. Open with the thought, not a hook formula.
-  - No hashtag block and no title — Threads posts do not use them.
+  - No hashtag block, no title, and no credits or @mentions — those are added separately.
   - Ending on an observation or a genuine question invites replies; do not force a call to action.`
   }
 
   return out
 }
 
-export function buildSystemPrompt(platform: PlatformId, voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, extras?: ExtraOutputs, imageCount: number = 1): string {
+export function buildSystemPrompt(platform: PlatformId, voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, extras?: ExtraOutputs, imageCount: number = 1, threads?: ThreadsBudget): string {
   const config = PLATFORMS[platform]
   const { budget } = calcCaptionBudget(platform, captionLen)
   const titleSpec = getTitleSpec(titleWords)
@@ -120,7 +150,7 @@ export function buildSystemPrompt(platform: PlatformId, voiceDescription?: strin
 You must respond with a JSON object containing:
 - "title": ${titleSpec.instruction}
 - "caption": The full caption text for ${config.name} (max ${config.captionMaxLength} characters). Write in a natural, engaging voice. Include line breaks for readability.
-- "hashtags": An array of relevant hashtags WITHOUT the # symbol (max ${config.hashtagLimit} hashtags)${buildExtraOutputsInstruction(extras, imageCount)}
+- "hashtags": An array of relevant hashtags WITHOUT the # symbol (max ${config.hashtagLimit} hashtags)${buildExtraOutputsInstruction(extras, imageCount, threads)}
 
 Guidelines for ${config.name}:
 ${platform === 'instagram' ? `- Captions should be engaging, tell a story or share insight about the photo
@@ -136,7 +166,7 @@ ${platform === 'linkedin' ? `- Professional tone, share industry insights
 Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.`
 }
 
-export function buildTemplateSystemPrompt(platform: PlatformId, llmFields: { key: string }[], voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, templateStaticChars: number = 0, extras?: ExtraOutputs, imageCount: number = 1): string {
+export function buildTemplateSystemPrompt(platform: PlatformId, llmFields: { key: string }[], voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, templateStaticChars: number = 0, extras?: ExtraOutputs, imageCount: number = 1, threads?: ThreadsBudget): string {
   const config = PLATFORMS[platform]
   const { budget } = calcCaptionBudget(platform, captionLen, templateStaticChars)
   const titleSpec = getTitleSpec(titleWords)
@@ -154,7 +184,7 @@ export function buildTemplateSystemPrompt(platform: PlatformId, llmFields: { key
   return `You are a social media content expert specializing in photography posts. You are filling placeholders in a post template for ${config.name}.
 
 You must respond with a JSON object containing these fields:
-${fieldList}${buildExtraOutputsInstruction(extras, imageCount)}
+${fieldList}${buildExtraOutputsInstruction(extras, imageCount, threads)}
 
 Guidelines for ${config.name}:
 ${platform === 'instagram' ? `- Captions should be engaging, tell a story or share insight about the photo

@@ -72,7 +72,7 @@ export const anthropicProvider: LLMProvider = {
     content.push({ type: 'text', text: req.userPrompt })
 
     const imageCount = req.imageCount ?? req.images.length
-    const extraProps = extraOutputProperties(req.extraOutputs, imageCount)
+    const extraProps = extraOutputProperties(req.extraOutputs, imageCount, req.threadsBudget)
 
     const res = await fetch('/api/anthropic/v1/messages', {
       method: 'POST',

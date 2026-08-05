@@ -54,6 +54,24 @@ export const enableThreadsPost = signal(false)
 export const editAltText = signal<string[]>([])
 export const editThreadsPost = signal('')
 
+/**
+ * Credits appended below every Threads post. Its length is reserved out of the
+ * platform limit so the generated text leaves room for it.
+ */
+export const DEFAULT_THREADS_CREDITS = `.
+.
+.
+.
+In Frame @
+Agency @
+Shot by @elmererana.portraits
+Produced by @formodele
+Studio @_studioyyc`
+
+export const threadsCredits = signal<string>(
+  localStorage.getItem('psp-threads-credits') ?? DEFAULT_THREADS_CREDITS
+)
+
 // Template state
 export const allTemplates = signal<PostTemplate[]>([])
 export const allSnippetSets = signal<SnippetSet[]>([])
@@ -147,6 +165,11 @@ if (savedSettings) {
     if (s.enableThreadsPost !== undefined) enableThreadsPost.value = !!s.enableThreadsPost
   } catch {}
 }
+
+// Threads credits block
+effect(() => {
+  localStorage.setItem('psp-threads-credits', threadsCredits.value)
+})
 
 // Auto-save generation settings
 effect(() => {
