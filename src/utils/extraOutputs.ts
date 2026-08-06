@@ -24,7 +24,7 @@ export function extraOutputProperties(
     const max = threadsBudget ?? PLATFORMS.threads.captionMaxLength
     props.threadsPost = {
       type: 'string',
-      description: `A standalone Threads post about the same photograph. STRICT maximum ${max} characters — a credits block is appended below it afterwards. Conversational, no hashtags, no title, no @mentions.`,
+      description: `A standalone Threads post about the same photograph. STRICT maximum ${max} characters — a credits block is appended below it afterwards, so end on your last sentence and never include a credits line, a "Credits:" label, a placeholder like "[credits]", or trailing dots. Conversational, no hashtags, no title, no @mentions.`,
     }
   }
 
@@ -33,6 +33,31 @@ export function extraOutputProperties(
 
 /** Keys the extras occupy — used to keep them out of template placeholder fills. */
 export const EXTRA_OUTPUT_KEYS = ['altText', 'threadsPost'] as const
+
+/**
+ * Models routinely sign off a Threads post with a stand-in for the credits —
+ * "[credits below]", a bare "Credits:", dot spacers, or an imitation of the real
+ * block — even when told not to. The real block is appended afterwards, so any
+ * such trailing lines are stripped here.
+ */
+const CREDITS_TRAILER_PATTERNS: RegExp[] = [
+  /^[\s.·•—–-]*$/,                                       // blank, or dot/dash spacer lines
+  /^[[({<].*[\])}>]$/,                                   // a whole-line placeholder: [credits], (credit block)
+  /^(photo\s+)?credits?(\s+block)?\s*[:—–-]*\s*$/i,      // a bare "Credits:" label
+  /^(credits?|@handles?|mentions?)\b.*\b(below|here|follow|to\s+be\s+added|go\s+here)\b.*$/i,
+  /^(shot|photo(graph(ed)?)?|captured|produced|directed|creative\s+direction|in\s+frame|studio|agency|model|mua|makeup|hair|styl(ing|ed)|wardrobe|lighting|edit(ed|ing)?|retouch(ing|ed)?)\b[^\n]*[@[]/i,
+]
+
+export function stripCreditsTrailer(text: string): string {
+  const lines = text.split('\n')
+  let end = lines.length
+  while (end > 0 && CREDITS_TRAILER_PATTERNS.some((re) => re.test(lines[end - 1].trim()))) {
+    end--
+  }
+  const stripped = lines.slice(0, end).join('\n').trimEnd()
+  // If it consumed everything, the heuristic misread real prose — keep the original
+  return stripped || text.trim()
+}
 
 /**
  * Coerce whatever the model returned into the shapes we expect.
@@ -64,7 +89,7 @@ export function normalizeExtras(
 
   if (extras?.threadsPost) {
     const raw = input.threadsPost
-    if (typeof raw === 'string' && raw.trim()) out.threadsPost = raw.trim()
+    if (typeof raw === 'string' && raw.trim()) out.threadsPost = stripCreditsTrailer(raw.trim())
   }
 
   return out

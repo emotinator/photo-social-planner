@@ -13,7 +13,10 @@ interface Props {
 export function InstagramPreview({ images, caption, hashtags, username, selectedIndex, onIndexChange }: Props) {
   const [imageUrls, setImageUrls] = useState<string[]>([])
 
-  const currentIndex = selectedIndex ?? 0
+  // The shared previewIndex outlives any one image set, so it can point past the
+  // end of this one. Clamp rather than render <img src={undefined}> — a blank frame.
+  const lastIndex = Math.max(images.length - 1, 0)
+  const currentIndex = Math.min(Math.max(selectedIndex ?? 0, 0), lastIndex)
   const setCurrentIndex = (i: number) => onIndexChange?.(i)
 
   useEffect(() => {

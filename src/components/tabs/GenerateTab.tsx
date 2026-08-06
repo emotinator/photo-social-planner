@@ -1,7 +1,7 @@
 import { useEffect, useCallback } from 'preact/hooks'
 import {
   selectedProvider, selectedModel, availableModels,
-  currentImages, currentNotes, currentPlatform,
+  currentImages, currentNotes, currentPlatform, previewIndex,
   isGenerating, generationError, generationResult,
   editTitle, editCaption, editHashtags,
   showToast, editingDraftId,
@@ -93,6 +93,7 @@ export function GenerateTab() {
 
   const handleNewPost = useCallback(() => {
     currentImages.value = []
+    previewIndex.value = 0
     currentNotes.value = ''
     editTitle.value = ''
     editCaption.value = ''

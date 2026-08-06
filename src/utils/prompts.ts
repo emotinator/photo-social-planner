@@ -128,6 +128,9 @@ export function buildExtraOutputsInstruction(
     is all you get. Coming in 20% short is fine; going over is not — if in doubt, write less.
   - Conversational and direct, like talking to someone. Open with the thought, not a hook formula.
   - No hashtag block, no title, and no credits or @mentions — those are added separately.
+  - End on your last sentence. Do NOT sign off with a credits line, a "Credits:" label,
+    a placeholder such as "[credits]" or "[credits below]", or rows of dots — the real
+    credits block is appended automatically and anything like it here is duplicated text.
   - Ending on an observation or a genuine question invites replies; do not force a call to action.`
   }
 
