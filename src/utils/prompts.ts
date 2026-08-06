@@ -1,5 +1,5 @@
 import type { PlatformId, ExtraOutputs } from '../types'
-import { PLATFORMS } from '../types'
+import { PLATFORMS, ALT_TEXT_MAX, ALT_TEXT_DESCRIPTION_TARGET } from '../types'
 import type { CaptionLength, TitleLength } from '../store'
 import type { RepetitionContext } from './repetition'
 
@@ -108,10 +108,14 @@ export function buildExtraOutputsInstruction(
 - "altText": An array of exactly ${imageCount} string${imageCount === 1 ? '' : 's'}, one per image in the order given.
   Each entry is the Instagram alt text for that specific image. Alt text is read aloud by screen
   readers AND used by Instagram to understand and surface the photo, so write it to serve both:
-  - Describe literally what is actually visible: subject, setting, action, light, colour, weather, time of day.
-  - Aim for about 125 characters. One sentence is usually right. Never exceed 200.
-  - Let searchable terms appear naturally because they are genuinely true of the photo — the location,
-    the subject, the genre, the technique. Do NOT bolt on keywords that do not describe the image.
+  - Open with a literal description of what is actually visible: subject, setting, action, light,
+    colour, weather, time of day. Aim for about ${ALT_TEXT_DESCRIPTION_TARGET} characters here — one sentence is usually
+    right. This opening is what a screen reader user hears first, so it must stand on its own.
+  - Instagram allows up to ${ALT_TEXT_MAX} characters total, so there is room after that sentence. Use it only
+    when you genuinely have more to say: further visible detail, the location, the subject, the genre,
+    the technique — terms someone might actually search for. Extra length is optional, never padding.
+  - Every term must be true of this photograph. Do NOT bolt on keywords that do not describe the
+    image, and do not repeat the same term to game search.
   - Never begin with "Image of", "Photo of", "A picture showing" or similar — start with the content itself.
   - No hashtags, no emoji, no marketing language, no calls to action.
   - Describe each image on its own terms. Do not write "the second image" or refer to the other slides.`
@@ -128,6 +132,9 @@ export function buildExtraOutputsInstruction(
     is all you get. Coming in 20% short is fine; going over is not — if in doubt, write less.
   - Conversational and direct, like talking to someone. Open with the thought, not a hook formula.
   - No hashtag block, no title, and no credits or @mentions — those are added separately.
+  - End on your last sentence. Do NOT sign off with a credits line, a "Credits:" label,
+    a placeholder such as "[credits]" or "[credits below]", or rows of dots — the real
+    credits block is appended automatically and anything like it here is duplicated text.
   - Ending on an observation or a genuine question invites replies; do not force a call to action.`
   }
 

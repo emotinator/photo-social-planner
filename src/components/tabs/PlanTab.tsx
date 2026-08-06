@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'preact/hooks'
 import {
-  savedDrafts, currentImages, currentNotes, currentPlatform,
+  savedDrafts, currentImages, currentNotes, currentPlatform, previewIndex,
   editTitle, editCaption, editHashtags, generationResult,
   activeTab, showToast, editingDraftId, scrollToPlanDraftId,
   selectedProvider, selectedModel,
@@ -154,6 +154,7 @@ export function PlanTab() {
 
   const handleLoad = (draft: Draft) => {
     currentImages.value = draft.images
+    previewIndex.value = 0
     currentNotes.value = draft.notes
     currentPlatform.value = draft.platform
     editTitle.value = draft.title

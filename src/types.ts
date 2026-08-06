@@ -150,6 +150,14 @@ export interface PlatformConfig {
   hashtagLimit: number
 }
 
+/**
+ * Instagram accepts up to 1000 characters of alt text. The opening description is
+ * what a screen reader leads with, so it stays short; the remaining room is spare
+ * capacity for genuinely relevant searchable detail, not a target to fill.
+ */
+export const ALT_TEXT_MAX = 1000
+export const ALT_TEXT_DESCRIPTION_TARGET = 125
+
 export const PLATFORMS: Record<PlatformId, PlatformConfig> = {
   instagram: { id: 'instagram', name: 'Instagram', captionMaxLength: 2200, hashtagLimit: 5 },
   threads: { id: 'threads', name: 'Threads', captionMaxLength: 500, hashtagLimit: 0 },
