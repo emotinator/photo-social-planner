@@ -1,5 +1,5 @@
 import type { ExtraOutputs } from '../types'
-import { PLATFORMS } from '../types'
+import { PLATFORMS, ALT_TEXT_MAX, ALT_TEXT_DESCRIPTION_TARGET } from '../types'
 
 /** JSON-schema fragments for the optional extra outputs, used by schema-capable providers. */
 export function extraOutputProperties(
@@ -16,7 +16,7 @@ export function extraOutputProperties(
       items: { type: 'string' },
       minItems: imageCount,
       maxItems: imageCount,
-      description: `Instagram alt text, one entry per image in order (${imageCount} total). Literal description of what is visible, about 125 characters, no "Image of" prefix, no hashtags.`,
+      description: `Instagram alt text, one entry per image in order (${imageCount} total). Opens with a literal description of what is visible, about ${ALT_TEXT_DESCRIPTION_TARGET} characters, optionally followed by further true, searchable detail. Hard maximum ${ALT_TEXT_MAX} characters. No "Image of" prefix, no hashtags.`,
     }
   }
 

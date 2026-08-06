@@ -19,7 +19,7 @@ import { buildRepetitionContext } from '../../utils/repetition'
 import { extractLLMFields, extractUserFields, assembleTemplate, staticTextLength } from '../../utils/templateParser'
 import { useState, useEffect as useEffectAlias } from 'preact/hooks'
 import type { PostTemplate, SnippetSet, CaptionVoice } from '../../types'
-import { PLATFORMS } from '../../types'
+import { PLATFORMS, ALT_TEXT_MAX, ALT_TEXT_DESCRIPTION_TARGET } from '../../types'
 
 /**
  * Copy a result's extra outputs into the editable fields (used on generate and on
@@ -67,7 +67,7 @@ export function GenerateTab() {
   const hasAlt = altList.some((t: string) => t)
   const hasThreads = !!editThreadsPost.value
   const threadsOver = editThreadsPost.value.length > PLATFORMS.threads.captionMaxLength
-  const altOver = altList.some((t: string) => t.length > 200)
+  const altOver = altList.some((t: string) => t.length > ALT_TEXT_MAX)
 
   const outputTabs = [
     hasResult && { id: 'post' as const, label: isTemplateMode ? 'Assembled' : 'Post' },
@@ -750,7 +750,7 @@ export function GenerateTab() {
                 </div>
               )}
               <textarea
-                rows={2}
+                rows={4}
                 value={alt}
                 placeholder="Alt text for this image..."
                 onInput={(e) => {
@@ -761,9 +761,12 @@ export function GenerateTab() {
               />
               <div style={{
                 marginTop: '4px', fontSize: '11px', fontFamily: "'DM Mono', monospace", textAlign: 'right',
-                color: alt.length > 200 ? 'var(--red, #e5534b)' : 'var(--text3)',
+                color: alt.length > ALT_TEXT_MAX ? 'var(--red, #e5534b)' : 'var(--text3)',
               }}>
-                {alt.length} chars {alt.length > 200 ? '· over 200, trim it' : '· aim ~125'}
+                {alt.length} / {ALT_TEXT_MAX} chars
+                {alt.length > ALT_TEXT_MAX
+                  ? ` · over Instagram's limit, trim it`
+                  : ` · first ~${ALT_TEXT_DESCRIPTION_TARGET} carry the description`}
               </div>
             </div>
           ))}
