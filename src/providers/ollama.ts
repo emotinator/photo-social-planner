@@ -77,6 +77,11 @@ export const ollamaProvider: LLMProvider = {
           },
         ],
         format: schema,
+        // Gemma4 reasons before answering unless told not to. That reasoning is
+        // billed against num_predict, so a long think leaves the JSON truncated
+        // — or, when it runs to the ceiling, empty. It also costs ~5x wall clock
+        // (26b: 29-45s thinking vs 5-13s without) for copy that needs no reasoning.
+        think: false,
         stream: false,
         options: {
           // Without this Ollama inherits whatever local default applies, which
