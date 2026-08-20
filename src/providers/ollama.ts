@@ -1,7 +1,7 @@
 import type { LLMProvider } from './types'
 import type { CallTimings, GenerateRequest, GenerateResponse, ModelInfo } from '../types'
 import { providerConfigs } from '../store'
-import { normalizeExtras, estimateMaxTokens, buildOutputSchema, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
+import { normalizeExtras, normalizeVoiceOutputs, estimateMaxTokens, buildOutputSchema, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
 
 const VISION_MODELS = ['gemma4', 'gemma3', 'llava', 'llava-llama3', 'llama3.2-vision', 'moondream', 'qwen2.5-vl']
 
@@ -61,6 +61,8 @@ export const ollamaProvider: LLMProvider = {
       extraOutputs: req.extraOutputs,
       imageCount: imgCount,
       threadsBudget: req.threadsBudget,
+      voices: req.voices,
+      captionBudget: req.captionBudget,
     })
 
     const startedAt = performance.now()
@@ -87,7 +89,7 @@ export const ollamaProvider: LLMProvider = {
         options: {
           // Without this Ollama inherits whatever local default applies, which
           // can cut long carousels off partway through the alt text array
-          num_predict: estimateMaxTokens(req.wantCaption !== false, req.extraOutputs, imgCount),
+          num_predict: estimateMaxTokens(req.wantCaption !== false, req.extraOutputs, imgCount, req.voices?.length),
         },
       }),
     })
@@ -115,10 +117,10 @@ export const ollamaProvider: LLMProvider = {
 
     // Template mode: extract all keys as llmFills
     if (req.templateLLMFields) {
-      return { ...parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imgCount), timings }
+      return { ...parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imgCount, req.voices), timings }
     }
 
-    return { ...parseResponse(raw, req.extraOutputs, imgCount), timings }
+    return { ...parseResponse(raw, req.extraOutputs, imgCount, req.voices), timings }
   },
 }
 
@@ -126,7 +128,8 @@ function parseTemplateResponse(
   raw: string,
   expectedKeys: string[],
   extras?: GenerateRequest['extraOutputs'],
-  imageCount: number = 1
+  imageCount: number = 1,
+  voices?: GenerateRequest['voices']
 ): GenerateResponse {
   try {
     const parsed = JSON.parse(raw)
@@ -143,6 +146,7 @@ function parseTemplateResponse(
       llmFills,
       raw,
       ...normalizeExtras(parsed, extras, imageCount),
+      ...normalizeVoiceOutputs(parsed, voices, expectedKeys),
     }
   } catch {
     return {
@@ -159,7 +163,8 @@ function parseTemplateResponse(
 function parseResponse(
   raw: string,
   extras?: GenerateRequest['extraOutputs'],
-  imageCount: number = 1
+  imageCount: number = 1,
+  voices?: GenerateRequest['voices']
 ): GenerateResponse {
   try {
     const parsed = JSON.parse(raw)
@@ -170,6 +175,7 @@ function parseResponse(
       templateFields: parsed.templateFields || {},
       raw,
       ...normalizeExtras(parsed, extras, imageCount),
+      ...normalizeVoiceOutputs(parsed, voices),
     }
   } catch {
     // Fallback: try to extract from text
