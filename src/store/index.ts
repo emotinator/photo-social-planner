@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals'
-import type { Draft, DraftImage, ProviderConfig, PlatformId, GenerateResponse, PostTemplate, SnippetSet, CaptionVoice } from '../types'
+import type { Draft, DraftImage, ProviderConfig, PlatformId, GenerateResponse, GenerationStats, PostTemplate, SnippetSet, CaptionVoice } from '../types'
 
 export type TabId = 'images' | 'generate' | 'templates' | 'deliver' | 'plan' | 'settings'
 
@@ -40,6 +40,8 @@ export const isReorderDrag = signal(false)
 export const isGenerating = signal(false)
 export const generationError = signal<string | null>(null)
 export const generationResult = signal<GenerateResponse | null>(null)
+// Kept after the run finishes — the point is to look at it once the spinner is gone
+export const generationStats = signal<GenerationStats | null>(null)
 
 // Editable result fields (post-generation)
 export const editTitle = signal('')

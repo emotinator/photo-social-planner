@@ -1,5 +1,5 @@
 import type { LLMProvider } from './types'
-import type { GenerateRequest, GenerateResponse, ModelInfo } from '../types'
+import type { CallTimings, GenerateRequest, GenerateResponse, ModelInfo } from '../types'
 import { normalizeExtras, estimateMaxTokens, buildOutputSchema, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
 import { providerConfigs } from '../store'
 
@@ -85,6 +85,7 @@ export const anthropicProvider: LLMProvider = {
       threadsBudget: req.threadsBudget,
     })
 
+    const startedAt = performance.now()
     const res = await fetch('/api/anthropic/v1/messages', {
       method: 'POST',
       headers: {
@@ -125,6 +126,14 @@ export const anthropicProvider: LLMProvider = {
     const data = await res.json()
     const raw = JSON.stringify(data, null, 2)
 
+    // The API reports tokens, not durations, so the breakdown stays empty here
+    // and only the wall clock is comparable against a local model.
+    const timings: CallTimings = {
+      wallMs: performance.now() - startedAt,
+      promptTokens: data.usage?.input_tokens,
+      genTokens: data.usage?.output_tokens,
+    }
+
     // A truncated response still parses — the tool call just comes back with some
     // keys missing or an alt text array cut short. Fail loudly instead of handing
     // back a half-filled result that looks like the model simply stopped early.
@@ -154,6 +163,7 @@ export const anthropicProvider: LLMProvider = {
           templateFields: {},
           llmFills: fills,
           raw,
+          timings,
           ...extras,
         }
       }
@@ -163,6 +173,7 @@ export const anthropicProvider: LLMProvider = {
         hashtags: (toolUse.input.hashtags || []).map((h: string) => h.replace(/^#/, '')),
         templateFields: {},
         raw,
+        timings,
         ...extras,
       }
     }
@@ -178,6 +189,7 @@ export const anthropicProvider: LLMProvider = {
           hashtags: (parsed.hashtags || []).map((h: string) => h.replace(/^#/, '')),
           templateFields: {},
           raw,
+          timings,
         }
       } catch {}
     }

@@ -2,7 +2,7 @@ import { useEffect, useCallback } from 'preact/hooks'
 import {
   selectedProvider, selectedModel, availableModels,
   currentImages, currentNotes, currentPlatform, previewIndex,
-  isGenerating, generationError, generationResult,
+  isGenerating, generationError, generationResult, generationStats,
   editTitle, editCaption, editHashtags,
   showToast, editingDraftId,
   allTemplates, allSnippetSets, selectedTemplateId,
@@ -12,7 +12,9 @@ import {
   enableCaption, enableAltText, enableThreadsPost, editAltText, editThreadsPost, threadsCredits,
   type CaptionLength, type TitleLength, type VoiceVariant,
 } from '../../store'
+import type { CallTimings, GenerateRequest } from '../../types'
 import { getProvider, getAllProviders } from '../../providers/registry'
+import { GenerationStatsLine } from '../shared/GenerationStatsLine'
 import { resizeForLLM, loadAllCaptionVoices, loadDraftsMeta } from '../../store/storage'
 import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt, getLengthSpec, calcCaptionBudget, getTitleSpec, calcThreadsBudget } from '../../utils/prompts'
 import { buildRepetitionContext } from '../../utils/repetition'
@@ -40,6 +42,7 @@ export function GenerateTab() {
   const models = availableModels.value
   const images = currentImages.value
   const generating = isGenerating.value
+  const stats = generationStats.value
   const error = generationError.value
   const [newHashtag, setNewHashtag] = useState('')
   const [outputTab, setOutputTab] = useState<'post' | 'alt' | 'threads'>('post')
@@ -164,11 +167,26 @@ export function GenerateTab() {
 
     isGenerating.value = true
     generationError.value = null
+    generationStats.value = null
     voiceVariants.value = {}
     chosenVoiceId.value = null
 
+    // A run is one to N provider calls — one per voice when variants are on —
+    // and the resize pass in front of them. Collect each so a slow run can be
+    // read apart afterwards instead of guessed at.
+    const callTimings: CallTimings[] = []
+    const prepStartedAt = performance.now()
+    let prepMs = 0
+
     try {
       const resized = await Promise.all(images.map((img: { blob: Blob }) => resizeForLLM(img.blob)))
+      prepMs = performance.now() - prepStartedAt
+
+      const timedGenerate = async (genReq: GenerateRequest) => {
+        const r = await p.generate(genReq)
+        if (r.timings) callTimings.push(r.timings)
+        return r
+      }
       const platform = currentPlatform.value
       const llmSnippets = isTemplateMode
         ? Object.fromEntries(Object.entries(snippetSelections.value).filter(([k]) => snippetLLMContext.value[k]))
@@ -209,7 +227,7 @@ export function GenerateTab() {
         // Extras only — no caption means no template to fill and nothing for a
         // voice to shape, so this is always a single call.
         const systemPrompt = buildSystemPrompt(platform, undefined, capLenVal, titLenVal, extraOutputs, imageCount, threadsBudget, false)
-        const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, wantCaption: false, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
+        const result = await timedGenerate({ model, images: resized, systemPrompt, userPrompt, platform, wantCaption: false, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
         generationResult.value = result
         applyVariantExtras(result)
         editTitle.value = ''
@@ -226,7 +244,7 @@ export function GenerateTab() {
           const newVariants: Record<string, VoiceVariant> = {}
           for (const voice of activeVoices) {
             const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voice.description, capLenVal, titLenVal, tmplStatic, extraOutputs, imageCount, threadsBudget)
-            const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
+            const result = await timedGenerate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
             const fills = result.llmFills || {}
             newVariants[voice.id] = {
               text: assembleTemplate(activeTemplate.body, fills, snippetSelections.value),
@@ -245,7 +263,7 @@ export function GenerateTab() {
           // Single voice or no voice
           const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined
           const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voiceDesc, capLenVal, titLenVal, tmplStatic, extraOutputs, imageCount, threadsBudget)
-          const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
+          const result = await timedGenerate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
           generationResult.value = result
           const fills = result.llmFills || {}
           assembledPost.value = assembleTemplate(activeTemplate.body, fills, snippetSelections.value)
@@ -263,7 +281,7 @@ export function GenerateTab() {
           let lastResult = null
           for (const voice of activeVoices) {
             const systemPrompt = buildSystemPrompt(platform, voice.description, capLenVal, titLenVal, extraOutputs, imageCount, threadsBudget)
-            const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
+            const result = await timedGenerate({ model, images: resized, systemPrompt, userPrompt, platform, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
             newVariants[voice.id] = {
               text: result.caption,
               altText: result.altText,
@@ -283,7 +301,7 @@ export function GenerateTab() {
         } else {
           const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined
           const systemPrompt = buildSystemPrompt(platform, voiceDesc, capLenVal, titLenVal, extraOutputs, imageCount, threadsBudget)
-          const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
+          const result = await timedGenerate({ model, images: resized, systemPrompt, userPrompt, platform, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
           generationResult.value = result
           editTitle.value = result.title
           editCaption.value = result.caption
@@ -315,6 +333,9 @@ export function GenerateTab() {
       showToast(e.message || 'Generation failed', 'error')
     } finally {
       isGenerating.value = false
+      if (prepMs || callTimings.length) {
+        generationStats.value = { model, imageCount: images.length, prepMs, calls: callTimings }
+      }
     }
   }, [provider, model, images, isTemplateMode, activeTemplate, selVoiceIds, voices, wantCaption, wantAltText, wantThreadsPost, hasAnyOutput])
 
@@ -658,6 +679,8 @@ export function GenerateTab() {
             {error}
           </div>
         )}
+
+        {stats && !generating && <GenerationStatsLine stats={stats} />}
       </div>
 
       {/* Voice variant picker */}

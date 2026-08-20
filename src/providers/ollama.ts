@@ -1,5 +1,5 @@
 import type { LLMProvider } from './types'
-import type { GenerateRequest, GenerateResponse, ModelInfo } from '../types'
+import type { CallTimings, GenerateRequest, GenerateResponse, ModelInfo } from '../types'
 import { providerConfigs } from '../store'
 import { normalizeExtras, estimateMaxTokens, buildOutputSchema, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
 
@@ -63,6 +63,7 @@ export const ollamaProvider: LLMProvider = {
       threadsBudget: req.threadsBudget,
     })
 
+    const startedAt = performance.now()
     const res = await fetch(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -99,12 +100,25 @@ export const ollamaProvider: LLMProvider = {
     const data = await res.json()
     const raw = data.message?.content || ''
 
-    // Template mode: extract all keys as llmFills
-    if (req.templateLLMFields) {
-      return parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imgCount)
+    // Ollama reports its own durations in nanoseconds. They are worth keeping
+    // apart: a slow call because the model was cold reads very differently from
+    // a slow call because the prompt was long.
+    const ns = (v: unknown) => (typeof v === 'number' ? v / 1e6 : undefined)
+    const timings: CallTimings = {
+      wallMs: performance.now() - startedAt,
+      loadMs: ns(data.load_duration),
+      promptMs: ns(data.prompt_eval_duration),
+      genMs: ns(data.eval_duration),
+      promptTokens: data.prompt_eval_count,
+      genTokens: data.eval_count,
     }
 
-    return parseResponse(raw, req.extraOutputs, imgCount)
+    // Template mode: extract all keys as llmFills
+    if (req.templateLLMFields) {
+      return { ...parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imgCount), timings }
+    }
+
+    return { ...parseResponse(raw, req.extraOutputs, imgCount), timings }
   },
 }
 

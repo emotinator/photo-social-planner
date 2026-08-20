@@ -125,6 +125,30 @@ export interface GenerateRequest {
   threadsBudget?: number
 }
 
+/**
+ * How long one provider call took. `wallMs` is measured around the request and
+ * is always present; the rest is whatever the provider reports about its own
+ * work, so the breakdown is there for Ollama and absent for Anthropic.
+ */
+export interface CallTimings {
+  wallMs: number
+  /** Time spent loading the model into memory — nonzero only on a cold call */
+  loadMs?: number
+  promptMs?: number
+  genMs?: number
+  promptTokens?: number
+  genTokens?: number
+}
+
+/** What one generation run spent, for performance visibility in the UI */
+export interface GenerationStats {
+  model: string
+  imageCount: number
+  /** Downscaling the images before any call goes out */
+  prepMs: number
+  calls: CallTimings[]
+}
+
 export interface GenerateResponse {
   title: string
   caption: string
@@ -135,6 +159,7 @@ export interface GenerateResponse {
   /** One alt text per image, in carousel order */
   altText?: string[]
   threadsPost?: string
+  timings?: CallTimings
 }
 
 export interface ProviderConfig {
