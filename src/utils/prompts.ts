@@ -194,6 +194,74 @@ ${platform === 'linkedin' ? `- Professional tone, share industry insights
 Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.`
 }
 
+/**
+ * System prompt for a run covering several voices in one call.
+ *
+ * The per-voice objects are the only structural difference from the single-voice
+ * prompt: same platform guidance, same length budget, and the budget is restated
+ * as applying to each caption independently. That last clause matters — without
+ * it the model treats the budget as a total and rations it across the voices.
+ */
+export function buildMultiVoiceSystemPrompt(
+  platform: PlatformId,
+  voices: { key: string; name: string; description: string }[],
+  captionLen: CaptionLength = 1,
+  titleWords: TitleLength = 6,
+  extras?: ExtraOutputs,
+  imageCount: number = 1,
+  threads?: ThreadsBudget
+): string {
+  const config = PLATFORMS[platform]
+  const { budget } = calcCaptionBudget(platform, captionLen)
+  const titleSpec = getTitleSpec(titleWords)
+  const lengthInstruction = buildLengthInstruction(captionLen, budget)
+
+  const voiceList = voices
+    .map((v) => `- "${v.key}" — write this one in the following voice/tone:\n    ${v.description}`)
+    .join('\n')
+
+  // Alt text is shared and stays at the top level; the Threads post is copy, so its
+  // instructions belong inside the per-voice object.
+  const sharedExtras = buildExtraOutputsInstruction(
+    extras?.altText ? { altText: true } : undefined,
+    imageCount,
+    threads
+  )
+  const perVoiceThreads = extras?.threadsPost
+    ? buildExtraOutputsInstruction({ threadsPost: true }, imageCount, threads).replace(
+        '\n\nADDITIONAL REQUIRED OUTPUT KEYS — include these in the same JSON object:',
+        '\n\nEach voice object ALSO includes:'
+      )
+    : ''
+
+  return `You are a social media content expert specializing in photography posts. Your job is to analyze photographs and write ${voices.length} different posts about them — the same photographs each time, in a different voice.
+
+You must respond with a JSON object containing one key per voice:
+${voiceList}
+
+Each of those ${voices.length} keys holds an object containing:
+- "title": ${titleSpec.instruction}
+- "caption": The full caption text for ${config.name}. Write in a natural, engaging voice. Include line breaks for readability.${budget ? `\n    LENGTH: roughly ${budget} characters. That is the length of EACH caption on its own, not a total to divide between the ${voices.length} voices. A caption of half that length is wrong, however good it reads.` : ''}
+- "hashtags": An array of relevant hashtags WITHOUT the # symbol (max ${config.hashtagLimit} hashtags)${perVoiceThreads}
+
+The voices must read as genuinely different pieces of writing, not one caption reworded. Each is the only one its reader will see, so each must stand entirely on its own — do not carry a thought over from one voice to the next, and do not refer to the other versions.
+
+EVERY requirement below applies to EACH voice independently, not to the response as a whole. In particular, each caption must meet the length requirement on its own.${sharedExtras}
+
+Guidelines for ${config.name}:
+${platform === 'instagram' ? `- Captions should be engaging, tell a story or share insight about the photo
+- Mix popular and niche hashtags for discoverability
+- Use line breaks and spacing for readability
+- The first line should hook the reader` : ''}
+${platform === 'threads' ? `- Keep it concise and conversational
+- No hashtags needed on Threads` : ''}
+${platform === 'linkedin' ? `- Professional tone, share industry insights
+- Use fewer, more targeted hashtags
+- Focus on value and expertise` : ''}${lengthInstruction}
+
+Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.`
+}
+
 export function buildTemplateSystemPrompt(platform: PlatformId, llmFields: { key: string }[], voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, templateStaticChars: number = 0, extras?: ExtraOutputs, imageCount: number = 1, threads?: ThreadsBudget): string {
   const config = PLATFORMS[platform]
   const { budget } = calcCaptionBudget(platform, captionLen, templateStaticChars)

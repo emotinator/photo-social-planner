@@ -123,6 +123,22 @@ export interface GenerateRequest {
   imageCount?: number
   /** Character ceiling for the Threads post, after reserving the credits block */
   threadsBudget?: number
+  /**
+   * Two or more voices to write for. When set, every voice's post comes back from
+   * this single call, keyed by `key` — the images are encoded once instead of once
+   * per voice, which is most of the cost of a multi-voice run.
+   */
+  voices?: { key: string; description: string }[]
+  /** Target caption length in characters, restated per voice on multi-voice calls */
+  captionBudget?: number
+}
+
+/** One voice's share of a multi-voice generation */
+export interface VoiceOutput {
+  title: string
+  caption: string
+  hashtags: string[]
+  threadsPost?: string
 }
 
 /**
@@ -159,6 +175,8 @@ export interface GenerateResponse {
   /** One alt text per image, in carousel order */
   altText?: string[]
   threadsPost?: string
+  /** Keyed by the voice keys sent in the request; set only for multi-voice calls */
+  voiceOutputs?: Record<string, VoiceOutput>
   timings?: CallTimings
 }
 

@@ -1,4 +1,4 @@
-import type { ExtraOutputs } from '../types'
+import type { ExtraOutputs, VoiceOutput } from '../types'
 import { PLATFORMS, ALT_TEXT_MAX, ALT_TEXT_DESCRIPTION_TARGET } from '../types'
 
 /**
@@ -20,11 +20,16 @@ const TOKENS_MAX = 16000      // far under any current vision model's output cap
 export function estimateMaxTokens(
   wantCaption: boolean,
   extras: ExtraOutputs | undefined,
-  imageCount: number
+  imageCount: number,
+  voiceCount: number = 1
 ): number {
-  let total = wantCaption ? TOKENS_CAPTION : 0
+  // A multi-voice call returns a full post per voice, so the caption and Threads
+  // allowances multiply. Alt text does not — it describes the photographs, which
+  // do not change with tone, so one shared set covers every voice.
+  const voices = Math.max(1, voiceCount)
+  let total = wantCaption ? TOKENS_CAPTION * voices : 0
   if (extras?.altText) total += Math.max(1, imageCount) * TOKENS_PER_ALT
-  if (extras?.threadsPost) total += TOKENS_THREADS
+  if (extras?.threadsPost) total += TOKENS_THREADS * voices
   return Math.min(TOKENS_MAX, Math.max(TOKENS_MIN, total))
 }
 
@@ -58,6 +63,23 @@ export function extraOutputProperties(
   return props
 }
 
+/** The title/caption/hashtags trio, as its own object so multi-voice can nest it. */
+function captionProperties(captionBudget?: number): Record<string, any> {
+  // Stating the target in the schema as well as the prompt matters for multi-voice:
+  // asked for six captions at once the model rations its output and returns half-length
+  // ones, and the schema description is the instruction it holds onto per key.
+  const lengthNote = captionBudget ? ` Write roughly ${captionBudget} characters — this applies to this caption on its own.` : ''
+  return {
+    title: { type: 'string', description: 'A compelling title for the post' },
+    caption: { type: 'string', description: `The full caption text for the social media post.${lengthNote}` },
+    hashtags: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Relevant hashtags without the # symbol',
+    },
+  }
+}
+
 /** Keys the extras occupy — used to keep them out of template placeholder fills. */
 export const EXTRA_OUTPUT_KEYS = ['altText', 'threadsPost'] as const
 
@@ -75,8 +97,30 @@ export function buildOutputSchema(req: {
   extraOutputs?: ExtraOutputs
   imageCount: number
   threadsBudget?: number
+  voices?: { key: string; description: string }[]
+  captionBudget?: number
 }): { type: 'object'; properties: Record<string, any>; required: string[] } {
   const extraProps = extraOutputProperties(req.extraOutputs, req.imageCount, req.threadsBudget)
+
+  // Multi-voice: one nested object per voice, with alt text left at the top level.
+  // Alt text describes the photographs and so is shared; the Threads post is copy
+  // and rides along inside each voice.
+  if (req.voices?.length && req.wantCaption !== false && !req.templateLLMFields) {
+    const { threadsPost, ...sharedExtras } = extraProps
+    const properties: Record<string, any> = { ...sharedExtras }
+
+    for (const voice of req.voices) {
+      const voiceProps = { ...captionProperties(req.captionBudget), ...(threadsPost ? { threadsPost } : {}) }
+      properties[voice.key] = {
+        type: 'object',
+        description: `The post written in this voice: ${voice.description}`,
+        properties: voiceProps,
+        required: Object.keys(voiceProps),
+      }
+    }
+    return { type: 'object', properties, required: Object.keys(properties) }
+  }
+
   let captionProps: Record<string, any> = {}
 
   if (req.wantCaption !== false) {
@@ -87,15 +131,7 @@ export function buildOutputSchema(req: {
             { type: 'string', description: `Value for the "${f.key}" placeholder` },
           ])
         )
-      : {
-          title: { type: 'string', description: 'A compelling title for the post' },
-          caption: { type: 'string', description: 'The full caption text for the social media post' },
-          hashtags: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Relevant hashtags without the # symbol',
-          },
-        }
+      : captionProperties()
   }
 
   const properties = { ...captionProps, ...extraProps }
@@ -161,4 +197,40 @@ export function normalizeExtras(
   }
 
   return out
+}
+
+/**
+ * Pull each voice's post out of a multi-voice response.
+ *
+ * A voice whose key is missing is left out rather than filled with blanks — the
+ * caller reports which ones failed, so a short response is visible instead of
+ * quietly showing four variants where six were asked for.
+ */
+export function normalizeVoiceOutputs(
+  input: any,
+  voices: { key: string }[] | undefined
+): { voiceOutputs?: Record<string, VoiceOutput> } {
+  if (!voices?.length || !input || typeof input !== 'object') return {}
+
+  const out: Record<string, VoiceOutput> = {}
+  for (const { key } of voices) {
+    const raw = input[key]
+    if (!raw || typeof raw !== 'object') continue
+
+    const caption = typeof raw.caption === 'string' ? raw.caption.trim() : ''
+    if (!caption) continue
+
+    out[key] = {
+      title: typeof raw.title === 'string' ? raw.title.trim() : '',
+      caption,
+      hashtags: Array.isArray(raw.hashtags)
+        ? raw.hashtags.map((h: unknown) => String(h).replace(/^#/, ''))
+        : [],
+      ...(typeof raw.threadsPost === 'string' && raw.threadsPost.trim()
+        ? { threadsPost: stripCreditsTrailer(raw.threadsPost.trim()) }
+        : {}),
+    }
+  }
+
+  return Object.keys(out).length ? { voiceOutputs: out } : {}
 }

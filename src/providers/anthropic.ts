@@ -1,6 +1,6 @@
 import type { LLMProvider } from './types'
 import type { CallTimings, GenerateRequest, GenerateResponse, ModelInfo } from '../types'
-import { normalizeExtras, estimateMaxTokens, buildOutputSchema, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
+import { normalizeExtras, normalizeVoiceOutputs, estimateMaxTokens, buildOutputSchema, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
 import { providerConfigs } from '../store'
 
 function getApiKey(): string {
@@ -83,6 +83,8 @@ export const anthropicProvider: LLMProvider = {
       extraOutputs: req.extraOutputs,
       imageCount,
       threadsBudget: req.threadsBudget,
+      voices: req.voices,
+      captionBudget: req.captionBudget,
     })
 
     const startedAt = performance.now()
@@ -96,7 +98,7 @@ export const anthropicProvider: LLMProvider = {
       body: JSON.stringify({
         model: req.model,
         // Sized to what was requested — a flat ceiling truncates long carousels
-        max_tokens: estimateMaxTokens(wantCaption, req.extraOutputs, imageCount),
+        max_tokens: estimateMaxTokens(wantCaption, req.extraOutputs, imageCount, req.voices?.length),
         system: req.systemPrompt,
         messages: [{ role: 'user', content }],
         tools: [
@@ -175,6 +177,7 @@ export const anthropicProvider: LLMProvider = {
         raw,
         timings,
         ...extras,
+        ...normalizeVoiceOutputs(toolUse.input, req.voices),
       }
     }
 

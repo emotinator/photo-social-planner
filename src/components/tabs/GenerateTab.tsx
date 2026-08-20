@@ -16,8 +16,9 @@ import type { CallTimings, GenerateRequest } from '../../types'
 import { getProvider, getAllProviders } from '../../providers/registry'
 import { GenerationStatsLine } from '../shared/GenerationStatsLine'
 import { resizeForLLM, loadAllCaptionVoices, loadDraftsMeta } from '../../store/storage'
-import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt, getLengthSpec, calcCaptionBudget, getTitleSpec, calcThreadsBudget } from '../../utils/prompts'
+import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt, buildMultiVoiceSystemPrompt, getLengthSpec, calcCaptionBudget, getTitleSpec, calcThreadsBudget } from '../../utils/prompts'
 import { buildRepetitionContext } from '../../utils/repetition'
+import { buildVoiceKeys } from '../../utils/voiceKeys'
 import { extractLLMFields, extractUserFields, assembleTemplate, staticTextLength } from '../../utils/templateParser'
 import { useState, useEffect as useEffectAlias } from 'preact/hooks'
 import type { PostTemplate, SnippetSet, CaptionVoice } from '../../types'
@@ -276,28 +277,53 @@ export function GenerateTab() {
       } else {
         // Classic mode
         if (hasMultipleVoices) {
-          // Generate variant per voice — store caption variants
+          // Every voice in one call. Sending the images once instead of once per
+          // voice is most of the run: on 26b with ten images, prefill was 8.3s of
+          // each ~15s call, paid six times over.
+          const voiceKeys = buildVoiceKeys(activeVoices)
+          const systemPrompt = buildMultiVoiceSystemPrompt(platform, voiceKeys, capLenVal, titLenVal, extraOutputs, imageCount, threadsBudget)
+          const result = await timedGenerate({
+            model, images: resized, systemPrompt, userPrompt, platform, extraOutputs, imageCount,
+            threadsBudget: threadsBudget.budget,
+            voices: voiceKeys.map((v) => ({ key: v.key, description: v.description })),
+            captionBudget: calcCaptionBudget(platform, capLenVal).budget,
+          })
+
+          // Alt text is shared across the voices; only the copy differs.
           const newVariants: Record<string, VoiceVariant> = {}
-          let lastResult = null
-          for (const voice of activeVoices) {
-            const systemPrompt = buildSystemPrompt(platform, voice.description, capLenVal, titLenVal, extraOutputs, imageCount, threadsBudget)
-            const result = await timedGenerate({ model, images: resized, systemPrompt, userPrompt, platform, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
-            newVariants[voice.id] = {
-              text: result.caption,
-              altText: result.altText,
-              threadsPost: result.threadsPost,
+          const missing: string[] = []
+          for (const voice of voiceKeys) {
+            const out = result.voiceOutputs?.[voice.key]
+            if (!out) {
+              missing.push(voice.name)
+              continue
             }
-            lastResult = result
+            newVariants[voice.id] = {
+              text: out.caption,
+              altText: result.altText,
+              threadsPost: out.threadsPost,
+            }
           }
+
+          generationResult.value = result
+          assembledPost.value = ''
+
+          if (!Object.keys(newVariants).length) {
+            throw new Error('No voice variants came back — try again, or reduce the number of voices')
+          }
+
           voiceVariants.value = newVariants
-          const firstId = activeVoices[0].id
+          const firstId = voiceKeys.find((v) => newVariants[v.id])!.id
+          const firstKey = voiceKeys.find((v) => v.id === firstId)!.key
           chosenVoiceId.value = firstId
           editCaption.value = newVariants[firstId].text
           applyVariantExtras(newVariants[firstId])
-          editTitle.value = lastResult?.title || ''
-          editHashtags.value = lastResult?.hashtags || []
-          generationResult.value = lastResult
-          assembledPost.value = ''
+          editTitle.value = result.voiceOutputs?.[firstKey]?.title || ''
+          editHashtags.value = result.voiceOutputs?.[firstKey]?.hashtags || []
+
+          if (missing.length) {
+            showToast(`No caption came back for ${missing.join(', ')} — regenerate to fill ${missing.length === 1 ? 'it' : 'them'} in`, 'error')
+          }
         } else {
           const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined
           const systemPrompt = buildSystemPrompt(platform, voiceDesc, capLenVal, titLenVal, extraOutputs, imageCount, threadsBudget)
@@ -321,7 +347,11 @@ export function GenerateTab() {
         }
       }
 
-      const voiceCount = activeVoices.length
+      // Count what actually came back, not what was asked for — a short multi-voice
+      // response already warned about the gap and must not then claim all six.
+      const voiceCount = hasMultipleVoices
+        ? Object.keys(voiceVariants.value).length
+        : activeVoices.length
       if (!wantCaption) {
         const made = [wantAlt && 'alt text', wantThreads && 'Threads post'].filter(Boolean).join(' + ')
         showToast(`Generated ${made}!`, 'success')
