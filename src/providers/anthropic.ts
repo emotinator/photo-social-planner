@@ -1,6 +1,6 @@
 import type { LLMProvider } from './types'
-import type { GenerateRequest, GenerateResponse, ModelInfo } from '../types'
-import { extraOutputProperties, normalizeExtras, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
+import type { CallTimings, GenerateRequest, GenerateResponse, ModelInfo } from '../types'
+import { normalizeExtras, estimateMaxTokens, buildOutputSchema, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
 import { providerConfigs } from '../store'
 
 function getApiKey(): string {
@@ -72,8 +72,20 @@ export const anthropicProvider: LLMProvider = {
     content.push({ type: 'text', text: req.userPrompt })
 
     const imageCount = req.imageCount ?? req.images.length
-    const extraProps = extraOutputProperties(req.extraOutputs, imageCount, req.threadsBudget)
+    const wantCaption = req.wantCaption !== false
+    const isTemplate = !!req.templateLLMFields
 
+    // Same schema both providers use — caption keys drop out when the caption
+    // wasn't asked for, and alt text carries a per-image min/max item count
+    const schema = buildOutputSchema({
+      templateLLMFields: req.templateLLMFields,
+      wantCaption: req.wantCaption,
+      extraOutputs: req.extraOutputs,
+      imageCount,
+      threadsBudget: req.threadsBudget,
+    })
+
+    const startedAt = performance.now()
     const res = await fetch('/api/anthropic/v1/messages', {
       method: 'POST',
       headers: {
@@ -83,46 +95,26 @@ export const anthropicProvider: LLMProvider = {
       },
       body: JSON.stringify({
         model: req.model,
-        // Headroom for per-image alt text plus a Threads post on top of the caption
-        max_tokens: 2048,
+        // Sized to what was requested — a flat ceiling truncates long carousels
+        max_tokens: estimateMaxTokens(wantCaption, req.extraOutputs, imageCount),
         system: req.systemPrompt,
         messages: [{ role: 'user', content }],
         tools: [
-          req.templateLLMFields
+          isTemplate
             ? {
                 name: 'template_fill',
                 description: 'Fill template placeholders for a social media post',
-                input_schema: {
-                  type: 'object',
-                  properties: {
-                    ...Object.fromEntries(
-                      req.templateLLMFields.map((f) => [f.key, { type: 'string', description: `Value for the "${f.key}" placeholder` }])
-                    ),
-                    ...extraProps,
-                  },
-                  required: [...req.templateLLMFields.map((f) => f.key), ...Object.keys(extraProps)],
-                },
+                input_schema: schema,
               }
             : {
                 name: 'social_post',
-                description: 'Generate a social media post draft',
-                input_schema: {
-                  type: 'object',
-                  properties: {
-                    title: { type: 'string', description: 'A compelling title for the post' },
-                    caption: { type: 'string', description: 'The full caption text for the social media post' },
-                    hashtags: {
-                      type: 'array',
-                      items: { type: 'string' },
-                      description: 'Relevant hashtags without the # symbol',
-                    },
-                    ...extraProps,
-                  },
-                  required: ['title', 'caption', 'hashtags', ...Object.keys(extraProps)],
-                },
+                description: wantCaption
+                  ? 'Generate a social media post draft'
+                  : 'Generate the requested outputs for a set of photographs',
+                input_schema: schema,
               },
         ],
-        tool_choice: { type: 'tool', name: req.templateLLMFields ? 'template_fill' : 'social_post' },
+        tool_choice: { type: 'tool', name: isTemplate ? 'template_fill' : 'social_post' },
       }),
     })
 
@@ -133,6 +125,24 @@ export const anthropicProvider: LLMProvider = {
 
     const data = await res.json()
     const raw = JSON.stringify(data, null, 2)
+
+    // The API reports tokens, not durations, so the breakdown stays empty here
+    // and only the wall clock is comparable against a local model.
+    const timings: CallTimings = {
+      wallMs: performance.now() - startedAt,
+      promptTokens: data.usage?.input_tokens,
+      genTokens: data.usage?.output_tokens,
+    }
+
+    // A truncated response still parses — the tool call just comes back with some
+    // keys missing or an alt text array cut short. Fail loudly instead of handing
+    // back a half-filled result that looks like the model simply stopped early.
+    if (data.stop_reason === 'max_tokens') {
+      throw new Error(
+        `The model ran out of room before finishing${imageCount > 1 ? ` all ${imageCount} images` : ''}. ` +
+        `Try fewer images, or turn off an output you don't need.`
+      )
+    }
 
     // Extract tool use result
     const toolUse = data.content?.find((c: any) => c.type === 'tool_use')
@@ -153,6 +163,7 @@ export const anthropicProvider: LLMProvider = {
           templateFields: {},
           llmFills: fills,
           raw,
+          timings,
           ...extras,
         }
       }
@@ -162,6 +173,7 @@ export const anthropicProvider: LLMProvider = {
         hashtags: (toolUse.input.hashtags || []).map((h: string) => h.replace(/^#/, '')),
         templateFields: {},
         raw,
+        timings,
         ...extras,
       }
     }
@@ -177,6 +189,7 @@ export const anthropicProvider: LLMProvider = {
           hashtags: (parsed.hashtags || []).map((h: string) => h.replace(/^#/, '')),
           templateFields: {},
           raw,
+          timings,
         }
       } catch {}
     }

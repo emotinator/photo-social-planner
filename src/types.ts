@@ -102,7 +102,7 @@ export interface ModelInfo {
   size?: string
 }
 
-/** Optional extra outputs requested alongside the main caption, in the same LLM call */
+/** Outputs requested alongside the main caption, in the same LLM call */
 export interface ExtraOutputs {
   altText?: boolean
   threadsPost?: boolean
@@ -116,11 +116,37 @@ export interface GenerateRequest {
   platform: PlatformId
   templateFields?: TemplateField[]
   templateLLMFields?: { key: string }[]
+  /** When false, no title/caption/hashtags are requested — extras only */
+  wantCaption?: boolean
   extraOutputs?: ExtraOutputs
   /** Number of images in the post — alt text returns one entry per image */
   imageCount?: number
   /** Character ceiling for the Threads post, after reserving the credits block */
   threadsBudget?: number
+}
+
+/**
+ * How long one provider call took. `wallMs` is measured around the request and
+ * is always present; the rest is whatever the provider reports about its own
+ * work, so the breakdown is there for Ollama and absent for Anthropic.
+ */
+export interface CallTimings {
+  wallMs: number
+  /** Time spent loading the model into memory — nonzero only on a cold call */
+  loadMs?: number
+  promptMs?: number
+  genMs?: number
+  promptTokens?: number
+  genTokens?: number
+}
+
+/** What one generation run spent, for performance visibility in the UI */
+export interface GenerationStats {
+  model: string
+  imageCount: number
+  /** Downscaling the images before any call goes out */
+  prepMs: number
+  calls: CallTimings[]
 }
 
 export interface GenerateResponse {
@@ -133,6 +159,7 @@ export interface GenerateResponse {
   /** One alt text per image, in carousel order */
   altText?: string[]
   threadsPost?: string
+  timings?: CallTimings
 }
 
 export interface ProviderConfig {

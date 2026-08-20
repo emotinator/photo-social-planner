@@ -1,7 +1,7 @@
 import type { LLMProvider } from './types'
-import type { GenerateRequest, GenerateResponse, ModelInfo } from '../types'
+import type { CallTimings, GenerateRequest, GenerateResponse, ModelInfo } from '../types'
 import { providerConfigs } from '../store'
-import { normalizeExtras, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
+import { normalizeExtras, estimateMaxTokens, buildOutputSchema, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
 
 const VISION_MODELS = ['gemma4', 'gemma3', 'llava', 'llava-llama3', 'llama3.2-vision', 'moondream', 'qwen2.5-vl']
 
@@ -50,7 +50,20 @@ export const ollamaProvider: LLMProvider = {
 
     const systemPrompt = req.systemPrompt
     const userPrompt = req.userPrompt
+    const imgCount = req.imageCount ?? req.images.length
 
+    // `format: 'json'` only buys syntactically valid JSON — the model still decides
+    // how many alt texts to write, and local models routinely stop at half. Handing
+    // Ollama the real schema constrains decoding, so the per-image count is enforced.
+    const schema = buildOutputSchema({
+      templateLLMFields: req.templateLLMFields,
+      wantCaption: req.wantCaption,
+      extraOutputs: req.extraOutputs,
+      imageCount: imgCount,
+      threadsBudget: req.threadsBudget,
+    })
+
+    const startedAt = performance.now()
     const res = await fetch(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -64,8 +77,18 @@ export const ollamaProvider: LLMProvider = {
             images: req.images.map((img) => img.base64),
           },
         ],
-        format: 'json',
+        format: schema,
+        // Gemma4 reasons before answering unless told not to. That reasoning is
+        // billed against num_predict, so a long think leaves the JSON truncated
+        // — or, when it runs to the ceiling, empty. It also costs ~5x wall clock
+        // (26b: 29-45s thinking vs 5-13s without) for copy that needs no reasoning.
+        think: false,
         stream: false,
+        options: {
+          // Without this Ollama inherits whatever local default applies, which
+          // can cut long carousels off partway through the alt text array
+          num_predict: estimateMaxTokens(req.wantCaption !== false, req.extraOutputs, imgCount),
+        },
       }),
     })
 
@@ -77,14 +100,25 @@ export const ollamaProvider: LLMProvider = {
     const data = await res.json()
     const raw = data.message?.content || ''
 
-    const imageCount = req.imageCount ?? req.images.length
+    // Ollama reports its own durations in nanoseconds. They are worth keeping
+    // apart: a slow call because the model was cold reads very differently from
+    // a slow call because the prompt was long.
+    const ns = (v: unknown) => (typeof v === 'number' ? v / 1e6 : undefined)
+    const timings: CallTimings = {
+      wallMs: performance.now() - startedAt,
+      loadMs: ns(data.load_duration),
+      promptMs: ns(data.prompt_eval_duration),
+      genMs: ns(data.eval_duration),
+      promptTokens: data.prompt_eval_count,
+      genTokens: data.eval_count,
+    }
 
     // Template mode: extract all keys as llmFills
     if (req.templateLLMFields) {
-      return parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imageCount)
+      return { ...parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imgCount), timings }
     }
 
-    return parseResponse(raw, req.extraOutputs, imageCount)
+    return { ...parseResponse(raw, req.extraOutputs, imgCount), timings }
   },
 }
 

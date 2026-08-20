@@ -141,7 +141,28 @@ export function buildExtraOutputsInstruction(
   return out
 }
 
-export function buildSystemPrompt(platform: PlatformId, voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, extras?: ExtraOutputs, imageCount: number = 1, threads?: ThreadsBudget): string {
+/**
+ * System prompt for a run with the caption switched off — alt text and/or a
+ * Threads post only. The caption, title, hashtag, length and voice guidance are
+ * all dropped: asking for prose we then discard wastes tokens and pulls the
+ * model's attention away from the outputs actually wanted.
+ */
+function buildExtrasOnlySystemPrompt(extras: ExtraOutputs | undefined, imageCount: number, threads?: ThreadsBudget): string {
+  return `You are a social media content expert specializing in photography posts. Your job is to analyze photographs and produce the specific outputs requested below.
+
+Do NOT write an Instagram caption, title, or hashtags — they were not requested and will be discarded.
+
+You must respond with a JSON object containing exactly these keys:${buildExtraOutputsInstruction(extras, imageCount, threads).replace(
+    '\n\nADDITIONAL REQUIRED OUTPUT KEYS — include these in the same JSON object:',
+    ''
+  )}
+
+Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.`
+}
+
+export function buildSystemPrompt(platform: PlatformId, voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, extras?: ExtraOutputs, imageCount: number = 1, threads?: ThreadsBudget, wantCaption: boolean = true): string {
+  if (!wantCaption) return buildExtrasOnlySystemPrompt(extras, imageCount, threads)
+
   const config = PLATFORMS[platform]
   const { budget } = calcCaptionBudget(platform, captionLen)
   const titleSpec = getTitleSpec(titleWords)
