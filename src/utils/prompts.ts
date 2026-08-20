@@ -195,6 +195,32 @@ Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.
 }
 
 /**
+ * The shared alt text block for a multi-voice call.
+ *
+ * Alt text is the one output that belongs to no voice: it describes the photographs,
+ * which are identical across the variants. Left next to the per-voice instructions it
+ * gets read as another thing to write in each voice, and comes back as single
+ * voice-flavoured words instead of descriptions — so it is fenced off with its own
+ * heading and told plainly that it is neither nested nor styled.
+ */
+function sharedAltTextSection(imageCount: number, threads?: ThreadsBudget): string {
+  const body = buildExtraOutputsInstruction({ altText: true }, imageCount, threads).replace(
+    '\n\nADDITIONAL REQUIRED OUTPUT KEYS — include these in the same JSON object:',
+    ''
+  )
+  return `\n\n────────\nSHARED OUTPUT — "altText"
+
+"altText" is a TOP-LEVEL key. It does NOT go inside the voice objects, and there is exactly
+one of it for the whole response, no matter how many voices were asked for.
+
+It is NOT written in any voice. The voices are ways of writing copy; alt text is a plain
+factual description of what is in each photograph, and the photographs are the same for
+every voice. Ignore the voice instructions entirely when writing it — no tone, no styling,
+no single-word entries, no echoing the voice names. Describe the images.
+${body}`
+}
+
+/**
  * System prompt for a run covering several voices in one call.
  *
  * The per-voice objects are the only structural difference from the single-voice
@@ -222,11 +248,10 @@ export function buildMultiVoiceSystemPrompt(
 
   // Alt text is shared and stays at the top level; the Threads post is copy, so its
   // instructions belong inside the per-voice object.
-  const sharedExtras = buildExtraOutputsInstruction(
-    extras?.altText ? { altText: true } : undefined,
-    imageCount,
-    threads
-  )
+  const sharedExtras = extras?.altText ? sharedAltTextSection(imageCount, threads) : ''
+  const sharedKeyNote = extras?.altText
+    ? '\n- "altText" — NOT a voice. One shared top-level array, described at the bottom.'
+    : ''
   const perVoiceThreads = extras?.threadsPost
     ? buildExtraOutputsInstruction({ threadsPost: true }, imageCount, threads).replace(
         '\n\nADDITIONAL REQUIRED OUTPUT KEYS — include these in the same JSON object:',
@@ -237,16 +262,16 @@ export function buildMultiVoiceSystemPrompt(
   return `You are a social media content expert specializing in photography posts. Your job is to analyze photographs and write ${voices.length} different posts about them — the same photographs each time, in a different voice.
 
 You must respond with a JSON object containing one key per voice:
-${voiceList}
+${voiceList}${sharedKeyNote}
 
-Each of those ${voices.length} keys holds an object containing:
+Each of those ${voices.length} voice keys holds an object containing:
 - "title": ${titleSpec.instruction}
 - "caption": The full caption text for ${config.name}. Write in a natural, engaging voice. Include line breaks for readability.${budget ? `\n    LENGTH: roughly ${budget} characters. That is the length of EACH caption on its own, not a total to divide between the ${voices.length} voices. A caption of half that length is wrong, however good it reads.` : ''}
 - "hashtags": An array of relevant hashtags WITHOUT the # symbol (max ${config.hashtagLimit} hashtags)${perVoiceThreads}
 
 The voices must read as genuinely different pieces of writing, not one caption reworded. Each is the only one its reader will see, so each must stand entirely on its own — do not carry a thought over from one voice to the next, and do not refer to the other versions.
 
-EVERY requirement below applies to EACH voice independently, not to the response as a whole. In particular, each caption must meet the length requirement on its own.${sharedExtras}
+EVERY requirement in this section applies to EACH voice object independently, not to the response as a whole. In particular, each caption must meet the length requirement on its own.${sharedExtras}
 
 Guidelines for ${config.name}:
 ${platform === 'instagram' ? `- Captions should be engaging, tell a story or share insight about the photo
@@ -297,11 +322,10 @@ export function buildMultiVoiceTemplateSystemPrompt(
     .map((v) => `- "${v.key}" — fill the placeholders in this voice/tone:\n    ${v.description}`)
     .join('\n')
 
-  const sharedExtras = buildExtraOutputsInstruction(
-    extras?.altText ? { altText: true } : undefined,
-    imageCount,
-    threads
-  )
+  const sharedExtras = extras?.altText ? sharedAltTextSection(imageCount, threads) : ''
+  const sharedKeyNote = extras?.altText
+    ? '\n- "altText" — NOT a voice. One shared top-level array, described at the bottom.'
+    : ''
   const perVoiceThreads = extras?.threadsPost
     ? buildExtraOutputsInstruction({ threadsPost: true }, imageCount, threads).replace(
         '\n\nADDITIONAL REQUIRED OUTPUT KEYS — include these in the same JSON object:',
@@ -312,14 +336,14 @@ export function buildMultiVoiceTemplateSystemPrompt(
   return `You are a social media content expert specializing in photography posts. You are filling placeholders in a post template for ${config.name}, ${voices.length} times over — the same photographs each time, in a different voice.
 
 You must respond with a JSON object containing one key per voice:
-${voiceList}
+${voiceList}${sharedKeyNote}
 
-Each of those ${voices.length} keys holds an object containing these fields:
+Each of those ${voices.length} voice keys holds an object containing these fields:
 ${fieldList}${perVoiceThreads}
 
 The voices must read as genuinely different pieces of writing, not one set of fills reworded. Each is the only one its reader will see, so each must stand entirely on its own — do not carry a thought over from one voice to the next, and do not refer to the other versions.
 
-EVERY requirement applies to EACH voice independently, not to the response as a whole.${sharedExtras}
+EVERY requirement in this section applies to EACH voice object independently, not to the response as a whole.${sharedExtras}
 
 Guidelines for ${config.name}:
 ${platform === 'instagram' ? `- Captions should be engaging, tell a story or share insight about the photo
