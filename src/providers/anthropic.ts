@@ -167,6 +167,7 @@ export const anthropicProvider: LLMProvider = {
           raw,
           timings,
           ...extras,
+          ...normalizeVoiceOutputs(toolUse.input, req.voices, req.templateLLMFields?.map((f) => f.key)),
         }
       }
       return {

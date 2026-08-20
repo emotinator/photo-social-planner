@@ -105,12 +105,22 @@ export function buildOutputSchema(req: {
   // Multi-voice: one nested object per voice, with alt text left at the top level.
   // Alt text describes the photographs and so is shared; the Threads post is copy
   // and rides along inside each voice.
-  if (req.voices?.length && req.wantCaption !== false && !req.templateLLMFields) {
+  if (req.voices?.length && req.wantCaption !== false) {
     const { threadsPost, ...sharedExtras } = extraProps
     const properties: Record<string, any> = { ...sharedExtras }
 
     for (const voice of req.voices) {
-      const voiceProps = { ...captionProperties(req.captionBudget), ...(threadsPost ? { threadsPost } : {}) }
+      // Template mode fills placeholders instead of the fixed caption trio, but
+      // nests the same way — one object per voice.
+      const bodyProps = req.templateLLMFields
+        ? Object.fromEntries(
+            req.templateLLMFields.map((f) => [
+              f.key,
+              { type: 'string', description: `Value for the "${f.key}" placeholder` },
+            ])
+          )
+        : captionProperties(req.captionBudget)
+      const voiceProps = { ...bodyProps, ...(threadsPost ? { threadsPost } : {}) }
       properties[voice.key] = {
         type: 'object',
         description: `The post written in this voice: ${voice.description}`,
@@ -208,7 +218,8 @@ export function normalizeExtras(
  */
 export function normalizeVoiceOutputs(
   input: any,
-  voices: { key: string }[] | undefined
+  voices: { key: string }[] | undefined,
+  templateKeys?: string[]
 ): { voiceOutputs?: Record<string, VoiceOutput> } {
   if (!voices?.length || !input || typeof input !== 'object') return {}
 
@@ -216,6 +227,23 @@ export function normalizeVoiceOutputs(
   for (const { key } of voices) {
     const raw = input[key]
     if (!raw || typeof raw !== 'object') continue
+
+    const threads =
+      typeof raw.threadsPost === 'string' && raw.threadsPost.trim()
+        ? { threadsPost: stripCreditsTrailer(raw.threadsPost.trim()) }
+        : {}
+
+    if (templateKeys) {
+      const fills: Record<string, string> = {}
+      for (const k of templateKeys) {
+        if ((EXTRA_OUTPUT_KEYS as readonly string[]).includes(k)) continue
+        fills[k] = String(raw[k] ?? '')
+      }
+      // A voice that filled nothing is a miss, not an empty post
+      if (!Object.values(fills).some((v) => v.trim())) continue
+      out[key] = { title: '', caption: '', hashtags: [], llmFills: fills, ...threads }
+      continue
+    }
 
     const caption = typeof raw.caption === 'string' ? raw.caption.trim() : ''
     if (!caption) continue
@@ -226,9 +254,7 @@ export function normalizeVoiceOutputs(
       hashtags: Array.isArray(raw.hashtags)
         ? raw.hashtags.map((h: unknown) => String(h).replace(/^#/, ''))
         : [],
-      ...(typeof raw.threadsPost === 'string' && raw.threadsPost.trim()
-        ? { threadsPost: stripCreditsTrailer(raw.threadsPost.trim()) }
-        : {}),
+      ...threads,
     }
   }
 

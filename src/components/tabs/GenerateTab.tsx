@@ -16,7 +16,7 @@ import type { CallTimings, GenerateRequest } from '../../types'
 import { getProvider, getAllProviders } from '../../providers/registry'
 import { GenerationStatsLine } from '../shared/GenerationStatsLine'
 import { resizeForLLM, loadAllCaptionVoices, loadDraftsMeta } from '../../store/storage'
-import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt, buildMultiVoiceSystemPrompt, getLengthSpec, calcCaptionBudget, getTitleSpec, calcThreadsBudget } from '../../utils/prompts'
+import { buildSystemPrompt, buildUserPrompt, buildTemplateSystemPrompt, buildMultiVoiceSystemPrompt, buildMultiVoiceTemplateSystemPrompt, getLengthSpec, calcCaptionBudget, getTitleSpec, calcThreadsBudget } from '../../utils/prompts'
 import { buildRepetitionContext } from '../../utils/repetition'
 import { buildVoiceKeys } from '../../utils/voiceKeys'
 import { extractLLMFields, extractUserFields, assembleTemplate, staticTextLength } from '../../utils/templateParser'
@@ -241,25 +241,46 @@ export function GenerateTab() {
         const llmFields = llmFieldKeys.map((key) => ({ key }))
 
         if (hasMultipleVoices) {
-          // Generate one variant per voice
+          // One call for every voice, same as classic mode — the placeholder fills
+          // nest under the voice keys instead of the caption trio.
+          const voiceKeys = buildVoiceKeys(activeVoices)
+          const systemPrompt = buildMultiVoiceTemplateSystemPrompt(platform, llmFields, voiceKeys, capLenVal, titLenVal, tmplStatic, extraOutputs, imageCount, threadsBudget)
+          const result = await timedGenerate({
+            model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields,
+            extraOutputs, imageCount, threadsBudget: threadsBudget.budget,
+            voices: voiceKeys.map((v) => ({ key: v.key, description: v.description })),
+            captionBudget: calcCaptionBudget(platform, capLenVal, tmplStatic).budget,
+          })
+
           const newVariants: Record<string, VoiceVariant> = {}
-          for (const voice of activeVoices) {
-            const systemPrompt = buildTemplateSystemPrompt(platform, llmFields, voice.description, capLenVal, titLenVal, tmplStatic, extraOutputs, imageCount, threadsBudget)
-            const result = await timedGenerate({ model, images: resized, systemPrompt, userPrompt, platform, templateLLMFields: llmFields, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
-            const fills = result.llmFills || {}
+          const missing: string[] = []
+          for (const voice of voiceKeys) {
+            const out = result.voiceOutputs?.[voice.key]
+            if (!out) {
+              missing.push(voice.name)
+              continue
+            }
             newVariants[voice.id] = {
-              text: assembleTemplate(activeTemplate.body, fills, snippetSelections.value),
+              text: assembleTemplate(activeTemplate.body, out.llmFills || {}, snippetSelections.value),
               altText: result.altText,
-              threadsPost: result.threadsPost,
+              threadsPost: out.threadsPost,
             }
           }
+
+          if (!Object.keys(newVariants).length) {
+            throw new Error('No voice variants came back — try again, or reduce the number of voices')
+          }
+
           voiceVariants.value = newVariants
-          // Auto-select the first
-          const firstId = activeVoices[0].id
+          const firstId = voiceKeys.find((v) => newVariants[v.id])!.id
           chosenVoiceId.value = firstId
           assembledPost.value = newVariants[firstId].text
           applyVariantExtras(newVariants[firstId])
-          generationResult.value = null
+          generationResult.value = result
+
+          if (missing.length) {
+            showToast(`No fills came back for ${missing.join(', ')} — regenerate to fill ${missing.length === 1 ? 'it' : 'them'} in`, 'error')
+          }
         } else {
           // Single voice or no voice
           const voiceDesc = activeVoices.length === 1 ? activeVoices[0].description : undefined

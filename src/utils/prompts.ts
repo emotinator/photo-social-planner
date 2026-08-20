@@ -262,6 +262,76 @@ ${platform === 'linkedin' ? `- Professional tone, share industry insights
 Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.`
 }
 
+/**
+ * Multi-voice counterpart to buildTemplateSystemPrompt — every voice's placeholder
+ * fills in one call, nested under the voice keys.
+ */
+export function buildMultiVoiceTemplateSystemPrompt(
+  platform: PlatformId,
+  llmFields: { key: string }[],
+  voices: { key: string; name: string; description: string }[],
+  captionLen: CaptionLength = 1,
+  titleWords: TitleLength = 6,
+  templateStaticChars: number = 0,
+  extras?: ExtraOutputs,
+  imageCount: number = 1,
+  threads?: ThreadsBudget
+): string {
+  const config = PLATFORMS[platform]
+  const { budget } = calcCaptionBudget(platform, captionLen, templateStaticChars)
+  const titleSpec = getTitleSpec(titleWords)
+  const lengthInstruction = buildLengthInstruction(captionLen, budget)
+
+  const fieldList = llmFields.map((f) => {
+    const key = f.key
+    if (key.toLowerCase() === 'title') return `  - "${key}": ${titleSpec.instruction}`
+    if (key.toLowerCase() === 'caption') {
+      const len = budget ? ` LENGTH: roughly ${budget} characters — that is the length of EACH voice's caption on its own, not a total to divide between the ${voices.length} voices.` : ''
+      return `  - "${key}": The caption text for ${config.name}. Write in a natural, engaging voice.${len}`
+    }
+    if (key.toLowerCase() === 'hashtags') return `  - "${key}": A string of space-separated hashtags with # symbols (max ${config.hashtagLimit} hashtags)`
+    return `  - "${key}": A relevant, well-written value for the "${key}" field`
+  }).join('\n')
+
+  const voiceList = voices
+    .map((v) => `- "${v.key}" — fill the placeholders in this voice/tone:\n    ${v.description}`)
+    .join('\n')
+
+  const sharedExtras = buildExtraOutputsInstruction(
+    extras?.altText ? { altText: true } : undefined,
+    imageCount,
+    threads
+  )
+  const perVoiceThreads = extras?.threadsPost
+    ? buildExtraOutputsInstruction({ threadsPost: true }, imageCount, threads).replace(
+        '\n\nADDITIONAL REQUIRED OUTPUT KEYS — include these in the same JSON object:',
+        '\n\nEach voice object ALSO includes:'
+      )
+    : ''
+
+  return `You are a social media content expert specializing in photography posts. You are filling placeholders in a post template for ${config.name}, ${voices.length} times over — the same photographs each time, in a different voice.
+
+You must respond with a JSON object containing one key per voice:
+${voiceList}
+
+Each of those ${voices.length} keys holds an object containing these fields:
+${fieldList}${perVoiceThreads}
+
+The voices must read as genuinely different pieces of writing, not one set of fills reworded. Each is the only one its reader will see, so each must stand entirely on its own — do not carry a thought over from one voice to the next, and do not refer to the other versions.
+
+EVERY requirement applies to EACH voice independently, not to the response as a whole.${sharedExtras}
+
+Guidelines for ${config.name}:
+${platform === 'instagram' ? `- Captions should be engaging, tell a story or share insight about the photo
+- Use line breaks and spacing for readability
+- The first line should hook the reader` : ''}
+${platform === 'threads' ? `- Keep it concise and conversational` : ''}
+${platform === 'linkedin' ? `- Professional tone, share industry insights
+- Focus on value and expertise` : ''}${lengthInstruction}
+
+Respond ONLY with valid JSON. No markdown, no code blocks, just the JSON object.`
+}
+
 export function buildTemplateSystemPrompt(platform: PlatformId, llmFields: { key: string }[], voiceDescription?: string, captionLen: CaptionLength = 1, titleWords: TitleLength = 6, templateStaticChars: number = 0, extras?: ExtraOutputs, imageCount: number = 1, threads?: ThreadsBudget): string {
   const config = PLATFORMS[platform]
   const { budget } = calcCaptionBudget(platform, captionLen, templateStaticChars)

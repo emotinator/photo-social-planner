@@ -117,7 +117,7 @@ export const ollamaProvider: LLMProvider = {
 
     // Template mode: extract all keys as llmFills
     if (req.templateLLMFields) {
-      return { ...parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imgCount), timings }
+      return { ...parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imgCount, req.voices), timings }
     }
 
     return { ...parseResponse(raw, req.extraOutputs, imgCount, req.voices), timings }
@@ -128,7 +128,8 @@ function parseTemplateResponse(
   raw: string,
   expectedKeys: string[],
   extras?: GenerateRequest['extraOutputs'],
-  imageCount: number = 1
+  imageCount: number = 1,
+  voices?: GenerateRequest['voices']
 ): GenerateResponse {
   try {
     const parsed = JSON.parse(raw)
@@ -145,6 +146,7 @@ function parseTemplateResponse(
       llmFills,
       raw,
       ...normalizeExtras(parsed, extras, imageCount),
+      ...normalizeVoiceOutputs(parsed, voices, expectedKeys),
     }
   } catch {
     return {

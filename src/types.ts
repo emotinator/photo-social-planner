@@ -139,6 +139,8 @@ export interface VoiceOutput {
   caption: string
   hashtags: string[]
   threadsPost?: string
+  /** Template mode: this voice's placeholder values */
+  llmFills?: Record<string, string>
 }
 
 /**
