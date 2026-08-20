@@ -102,7 +102,7 @@ export interface ModelInfo {
   size?: string
 }
 
-/** Optional extra outputs requested alongside the main caption, in the same LLM call */
+/** Outputs requested alongside the main caption, in the same LLM call */
 export interface ExtraOutputs {
   altText?: boolean
   threadsPost?: boolean
@@ -116,6 +116,8 @@ export interface GenerateRequest {
   platform: PlatformId
   templateFields?: TemplateField[]
   templateLLMFields?: { key: string }[]
+  /** When false, no title/caption/hashtags are requested — extras only */
+  wantCaption?: boolean
   extraOutputs?: ExtraOutputs
   /** Number of images in the post — alt text returns one entry per image */
   imageCount?: number

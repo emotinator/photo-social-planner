@@ -46,7 +46,8 @@ export const editTitle = signal('')
 export const editCaption = signal('')
 export const editHashtags = signal<string[]>([])
 
-// ── Extra outputs (opt-in, generated in the same call as the caption) ──
+// ── Outputs (all opt-in, generated in a single call; at least one required) ──
+export const enableCaption = signal(true)
 export const enableAltText = signal(false)
 export const enableThreadsPost = signal(false)
 
@@ -161,6 +162,7 @@ if (savedSettings) {
     if (s.captionLength !== undefined) captionLength.value = s.captionLength
     if (s.titleLength !== undefined) titleLength.value = s.titleLength
     if (s.templateId !== undefined) selectedTemplateId.value = s.templateId
+    if (s.enableCaption !== undefined) enableCaption.value = !!s.enableCaption
     if (s.enableAltText !== undefined) enableAltText.value = !!s.enableAltText
     if (s.enableThreadsPost !== undefined) enableThreadsPost.value = !!s.enableThreadsPost
   } catch {}
@@ -180,6 +182,7 @@ effect(() => {
     captionLength: captionLength.value,
     titleLength: titleLength.value,
     templateId: selectedTemplateId.value,
+    enableCaption: enableCaption.value,
     enableAltText: enableAltText.value,
     enableThreadsPost: enableThreadsPost.value,
   }))

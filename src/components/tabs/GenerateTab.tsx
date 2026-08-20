@@ -9,7 +9,7 @@ import {
   snippetSelections, snippetLLMContext, assembledPost,
   allCaptionVoices, selectedVoiceIds, voiceVariants, chosenVoiceId,
   captionLength, titleLength,
-  enableAltText, enableThreadsPost, editAltText, editThreadsPost, threadsCredits,
+  enableCaption, enableAltText, enableThreadsPost, editAltText, editThreadsPost, threadsCredits,
   type CaptionLength, type TitleLength, type VoiceVariant,
 } from '../../store'
 import { getProvider, getAllProviders } from '../../providers/registry'
@@ -44,19 +44,28 @@ export function GenerateTab() {
   const [newHashtag, setNewHashtag] = useState('')
   const [outputTab, setOutputTab] = useState<'post' | 'alt' | 'threads'>('post')
 
+  // ── Outputs ──
+  // The caption is one output among three rather than an assumed baseline, so an
+  // alt-text-only run is a first-class thing to ask for. At least one is required.
+  const wantCaption = enableCaption.value
+  const wantAltText = enableAltText.value
+  const wantThreadsPost = enableThreadsPost.value && currentPlatform.value !== 'threads'
+  const hasAnyOutput = wantCaption || wantAltText || wantThreadsPost
+
   const templates = allTemplates.value
   const snippetSets = allSnippetSets.value
   const templateId = selectedTemplateId.value
   const activeTemplate = templateId ? templates.find((t: PostTemplate) => t.id === templateId) : null
   const userFields = activeTemplate ? extractUserFields(activeTemplate.body) : []
-  const isTemplateMode = !!activeTemplate
+  // Templates only shape the caption — with it off there is nothing to fill
+  const isTemplateMode = !!activeTemplate && wantCaption
 
   const capLen = captionLength.value
   const titLen = titleLength.value
   const templateStatic = activeTemplate ? staticTextLength(activeTemplate.body) : 0
   const { budget, platformMax } = calcCaptionBudget(currentPlatform.value, capLen, templateStatic)
 
-  // Detect if workspace has generated content
+  // Whether a caption exists — gates the Post tab specifically
   const hasResult = !!(editCaption.value || assembledPost.value)
   const isEditing = !!editingDraftId.value
 
@@ -90,6 +99,9 @@ export function GenerateTab() {
     ? outputTab
     : outputTabs[0]?.id ?? 'post'
   const showOutputTabs = outputTabs.length > 1
+
+  // Any generated content at all — an alt-text-only run still needs a way to clear
+  const hasAnyResult = outputTabs.length > 0
 
   const handleNewPost = useCallback(() => {
     currentImages.value = []
@@ -139,6 +151,11 @@ export function GenerateTab() {
       return
     }
 
+    if (!hasAnyOutput) {
+      showToast('Pick at least one output to generate', 'error')
+      return
+    }
+
     const p = getProvider(provider)
     if (!p) {
       showToast('Select a provider', 'error')
@@ -172,10 +189,10 @@ export function GenerateTab() {
       const titLenVal = titleLength.value
       const tmplStatic = activeTemplate ? staticTextLength(activeTemplate.body) : 0
 
-      // Extra outputs ride along in the same call. A separate Threads post is
+      // Every output rides along in the same call. A separate Threads post is
       // meaningless when the post itself is already for Threads.
-      const wantAlt = enableAltText.value
-      const wantThreads = enableThreadsPost.value && platform !== 'threads'
+      const wantAlt = wantAltText
+      const wantThreads = wantThreadsPost
       const extraOutputs = wantAlt || wantThreads
         ? { altText: wantAlt, threadsPost: wantThreads }
         : undefined
@@ -188,7 +205,18 @@ export function GenerateTab() {
       editAltText.value = []
       editThreadsPost.value = ''
 
-      if (isTemplateMode && activeTemplate) {
+      if (!wantCaption) {
+        // Extras only — no caption means no template to fill and nothing for a
+        // voice to shape, so this is always a single call.
+        const systemPrompt = buildSystemPrompt(platform, undefined, capLenVal, titLenVal, extraOutputs, imageCount, threadsBudget, false)
+        const result = await p.generate({ model, images: resized, systemPrompt, userPrompt, platform, wantCaption: false, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
+        generationResult.value = result
+        applyVariantExtras(result)
+        editTitle.value = ''
+        editCaption.value = ''
+        editHashtags.value = []
+        assembledPost.value = ''
+      } else if (isTemplateMode && activeTemplate) {
         // Template mode
         const llmFieldKeys = extractLLMFields(activeTemplate.body)
         const llmFields = llmFieldKeys.map((key) => ({ key }))
@@ -265,15 +293,30 @@ export function GenerateTab() {
         }
       }
 
+      // The schema constrains the count, but a model can still hand back blanks.
+      // Say so rather than leaving silently empty slots to be discovered later.
+      if (wantAlt) {
+        const filled = editAltText.value.filter((t: string) => t.trim()).length
+        if (filled < imageCount) {
+          showToast(`Only ${filled} of ${imageCount} alt texts came back — regenerate or fill the gaps`, 'error')
+          return   // results stay on screen; the `finally` clears the spinner
+        }
+      }
+
       const voiceCount = activeVoices.length
-      showToast(voiceCount > 1 ? `Generated ${voiceCount} voice variants!` : 'Draft generated!', 'success')
+      if (!wantCaption) {
+        const made = [wantAlt && 'alt text', wantThreads && 'Threads post'].filter(Boolean).join(' + ')
+        showToast(`Generated ${made}!`, 'success')
+      } else {
+        showToast(voiceCount > 1 ? `Generated ${voiceCount} voice variants!` : 'Draft generated!', 'success')
+      }
     } catch (e: any) {
       generationError.value = e.message || 'Generation failed'
       showToast(e.message || 'Generation failed', 'error')
     } finally {
       isGenerating.value = false
     }
-  }, [provider, model, images, isTemplateMode, activeTemplate, selVoiceIds, voices])
+  }, [provider, model, images, isTemplateMode, activeTemplate, selVoiceIds, voices, wantCaption, wantAltText, wantThreadsPost, hasAnyOutput])
 
   const addHashtag = () => {
     const tag = newHashtag.trim().replace(/^#/, '')
@@ -290,7 +333,7 @@ export function GenerateTab() {
   return (
     <>
       {/* New Post button — shown when workspace has generated content */}
-      {hasResult && (
+      {hasAnyResult && (
         <div class="section">
           <button class="btn btn-ghost btn-full" onClick={handleNewPost}>
             <span class="material-symbols-outlined" style={{ fontSize: '16px' }}>add_circle</span>
@@ -342,7 +385,7 @@ export function GenerateTab() {
           </select>
         </div>
 
-        <div class="field-row">
+        <div class="field-row" style={{ display: wantCaption ? undefined : 'none' }}>
           <div class="field-label">Template</div>
           <select
             value={templateId || ''}
@@ -362,7 +405,8 @@ export function GenerateTab() {
         </div>
       </div>
 
-      {/* ── Length Controls ── */}
+      {/* ── Length Controls ── (caption-only, hidden when it isn't being generated) */}
+      {wantCaption && (
       <div class="section">
         <div class="section-label">Content Length</div>
 
@@ -430,13 +474,29 @@ export function GenerateTab() {
           </div>
         </div>
       </div>
+      )}
 
-      {/* ── Extra Outputs ── */}
+      {/* ── Outputs ── */}
       <div class="section">
-        <div class="section-label">Extra Outputs</div>
+        <div class="section-label">Outputs</div>
         <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginBottom: '8px' }}>
-          Generated in the same request — no extra wait.
+          Pick at least one — all generated in the same request, no extra wait.
         </div>
+
+        <label class="template-list-item" style={{ cursor: 'pointer', marginBottom: '4px' }}>
+          <input
+            type="checkbox"
+            checked={enableCaption.value}
+            onChange={(e) => (enableCaption.value = (e.target as HTMLInputElement).checked)}
+            style={{ accentColor: 'var(--accent)', marginRight: '6px' }}
+          />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Instagram caption</div>
+            <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginTop: '3px' }}>
+              {activeTemplate ? `Template: ${activeTemplate.name}` : 'Title · caption · hashtags'}
+            </div>
+          </div>
+        </label>
 
         <label class="template-list-item" style={{ cursor: 'pointer', marginBottom: '4px' }}>
           <input
@@ -469,10 +529,16 @@ export function GenerateTab() {
             </div>
           </label>
         )}
+
+        {!hasAnyOutput && (
+          <div style={{ fontSize: '11px', color: 'var(--red, #e5534b)', fontFamily: "'DM Mono', monospace", marginTop: '8px' }}>
+            Nothing selected — tick an output to generate.
+          </div>
+        )}
       </div>
 
-      {/* Voice selector (multi-select) */}
-      {voices.length > 0 && (
+      {/* Voice selector (multi-select) — a voice only shapes the caption */}
+      {wantCaption && voices.length > 0 && (
         <div class="section">
           <div class="section-label">Caption Voice</div>
           <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginBottom: '8px' }}>
@@ -572,7 +638,7 @@ export function GenerateTab() {
         <button
           class="btn btn-accent btn-full"
           onClick={handleGenerate}
-          disabled={generating || images.length === 0}
+          disabled={generating || images.length === 0 || !hasAnyOutput}
         >
           {generating ? (
             <>

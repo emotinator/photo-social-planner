@@ -1,7 +1,7 @@
 import type { LLMProvider } from './types'
 import type { GenerateRequest, GenerateResponse, ModelInfo } from '../types'
 import { providerConfigs } from '../store'
-import { normalizeExtras, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
+import { normalizeExtras, estimateMaxTokens, buildOutputSchema, EXTRA_OUTPUT_KEYS } from '../utils/extraOutputs'
 
 const VISION_MODELS = ['gemma4', 'gemma3', 'llava', 'llava-llama3', 'llama3.2-vision', 'moondream', 'qwen2.5-vl']
 
@@ -50,6 +50,18 @@ export const ollamaProvider: LLMProvider = {
 
     const systemPrompt = req.systemPrompt
     const userPrompt = req.userPrompt
+    const imgCount = req.imageCount ?? req.images.length
+
+    // `format: 'json'` only buys syntactically valid JSON — the model still decides
+    // how many alt texts to write, and local models routinely stop at half. Handing
+    // Ollama the real schema constrains decoding, so the per-image count is enforced.
+    const schema = buildOutputSchema({
+      templateLLMFields: req.templateLLMFields,
+      wantCaption: req.wantCaption,
+      extraOutputs: req.extraOutputs,
+      imageCount: imgCount,
+      threadsBudget: req.threadsBudget,
+    })
 
     const res = await fetch(`${base}/api/chat`, {
       method: 'POST',
@@ -64,8 +76,13 @@ export const ollamaProvider: LLMProvider = {
             images: req.images.map((img) => img.base64),
           },
         ],
-        format: 'json',
+        format: schema,
         stream: false,
+        options: {
+          // Without this Ollama inherits whatever local default applies, which
+          // can cut long carousels off partway through the alt text array
+          num_predict: estimateMaxTokens(req.wantCaption !== false, req.extraOutputs, imgCount),
+        },
       }),
     })
 
@@ -77,14 +94,12 @@ export const ollamaProvider: LLMProvider = {
     const data = await res.json()
     const raw = data.message?.content || ''
 
-    const imageCount = req.imageCount ?? req.images.length
-
     // Template mode: extract all keys as llmFills
     if (req.templateLLMFields) {
-      return parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imageCount)
+      return parseTemplateResponse(raw, req.templateLLMFields.map((f) => f.key), req.extraOutputs, imgCount)
     }
 
-    return parseResponse(raw, req.extraOutputs, imageCount)
+    return parseResponse(raw, req.extraOutputs, imgCount)
   },
 }
 
