@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import { scrollToPlanDraftId } from '../../store'
 import type { Draft } from '../../types'
+import { planDateSlots } from '../../utils/planDates'
 
 interface Props {
   drafts: Draft[]
@@ -21,7 +22,8 @@ function sortForGrid(drafts: Draft[]): Draft[] {
 export function InstagramGridPreview({ drafts }: Props) {
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({})
 
-  const igDrafts = drafts.filter((d) => d.platform === 'instagram')
+  // A Threads-only draft never reaches the Instagram feed, so it has no place in the grid
+  const igDrafts = drafts.filter((d) => d.platform === 'instagram' && planDateSlots(d).caption)
   const sorted = sortForGrid(igDrafts)
 
   // Build thumbnail URLs from first image of each draft

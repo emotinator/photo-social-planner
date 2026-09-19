@@ -10,6 +10,8 @@ import {
 import { saveDraft, loadAllDrafts, deleteDraft } from '../../store/storage'
 import { PLATFORMS } from '../../types'
 import type { Draft, DraftImage, PlatformId } from '../../types'
+import { PlatformGlyph } from '../shared/PlatformGlyph'
+import { planDateSlots, earliestPlannedDate, threadsDate } from '../../utils/planDates'
 
 const PLATFORM_ICONS: Record<PlatformId, string> = {
   instagram: 'photo_camera',
@@ -108,6 +110,7 @@ export function PlanTab() {
           }
         : undefined,
       plannedDate: existing?.plannedDate,
+      threadsPlannedDate: existing?.threadsPlannedDate,
       planOrder: existing?.planOrder,
       assembledPost: isTemplateMode ? assembledPost.value : undefined,
       templateId: selectedTemplateId.value || undefined,
@@ -186,8 +189,8 @@ export function PlanTab() {
     savedDrafts.value = await loadAllDrafts()
   }
 
-  const handleDateChange = async (draft: Draft, dateStr: string) => {
-    const updated = { ...draft, plannedDate: dateStr || undefined, updatedAt: new Date().toISOString() }
+  const handleDateChange = async (draft: Draft, field: 'plannedDate' | 'threadsPlannedDate', dateStr: string) => {
+    const updated = { ...draft, [field]: dateStr || undefined, updatedAt: new Date().toISOString() }
     if (dateStr && draft.status === 'draft') {
       updated.status = 'planned'
     }
@@ -196,15 +199,57 @@ export function PlanTab() {
   }
 
   // Sort by planned date, latest first; undated drafts sink to the bottom
-  // (ordered by most recently updated among themselves).
+  // (ordered by most recently updated among themselves). A draft with both an
+  // Instagram and a Threads date sorts by the earlier of the two.
   const sorted = [...drafts].sort((a: Draft, b: Draft) => {
-    if (a.plannedDate && b.plannedDate) return b.plannedDate.localeCompare(a.plannedDate)
-    if (a.plannedDate) return -1
-    if (b.plannedDate) return 1
+    const aDate = earliestPlannedDate(a)
+    const bDate = earliestPlannedDate(b)
+    if (aDate && bDate) return bDate.localeCompare(aDate)
+    if (aDate) return -1
+    if (bDate) return 1
     return b.updatedAt.localeCompare(a.updatedAt)
   })
 
-  const today = new Date().toISOString().split('T')[0]
+  // Local calendar date — toISOString() is UTC, which rolls over to tomorrow in the evening
+  const now = new Date()
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
+  /** One planned-date row, marked with the glyph of the platform it publishes to */
+  const renderDateRow = (draft: Draft, field: 'plannedDate' | 'threadsPlannedDate', platform: PlatformId) => {
+    const value = field === 'threadsPlannedDate' ? threadsDate(draft) : draft[field]
+    // An unpinned Threads date follows the main one. That row is on screen too and
+    // already carries the overdue/today flag, so the follower is dimmed and stays quiet.
+    const inherited = field === 'threadsPlannedDate' && !draft.threadsPlannedDate && !!value && planDateSlots(draft).caption
+    const isOverdue = !inherited && !!value && value < today && draft.status !== 'posted'
+    const isToday = !inherited && value === today
+    const name = PLATFORMS[platform].name
+    const hint = inherited
+      ? `Threads post follows the planned date — pick a date to post it on a different day`
+      : `Planned ${name} post date`
+    return (
+      <div class="plan-date-picker">
+        {platform === 'instagram' || platform === 'threads' ? (
+          <PlatformGlyph platform={platform} />
+        ) : (
+          <span class="material-symbols-outlined" style={{ fontSize: '13px', color: 'var(--text3)' }}>calendar_month</span>
+        )}
+        <input
+          type="date"
+          class={`plan-date-input ${isOverdue ? 'overdue' : ''} ${isToday ? 'today' : ''} ${inherited ? 'inherited' : ''}`}
+          value={value || ''}
+          onChange={(e) => handleDateChange(draft, field, (e.target as HTMLInputElement).value)}
+          title={hint}
+          aria-label={`Planned ${name} post date`}
+        />
+        {isOverdue && (
+          <span class="plan-date-flag overdue">overdue</span>
+        )}
+        {isToday && (
+          <span class="plan-date-flag today">today</span>
+        )}
+      </div>
+    )
+  }
 
   return (
     <>
@@ -248,10 +293,12 @@ export function PlanTab() {
         ) : (
           <div class="plan-list">
             {sorted.map((draft) => {
-              const platformConfig = PLATFORMS[draft.platform]
-              const icon = PLATFORM_ICONS[draft.platform]
-              const isOverdue = draft.plannedDate && draft.plannedDate < today && draft.status !== 'posted'
-              const isToday = draft.plannedDate === today
+              const slots = planDateSlots(draft)
+              // With no caption the platform setting means nothing — the draft is a Threads post
+              const badgePlatform: PlatformId = slots.caption ? draft.platform : 'threads'
+              const platformConfig = PLATFORMS[badgePlatform]
+              const icon = PLATFORM_ICONS[badgePlatform]
+              const snippet = draft.assembledPost || draft.caption || draft.threadsPost
               const isActive = editingDraftId.value === draft.id
 
               return (
@@ -265,7 +312,7 @@ export function PlanTab() {
                       {draft.title || 'Untitled Draft'}
                     </div>
                     <div class="plan-item-badges">
-                      <span class={`badge badge-platform badge-platform-${draft.platform}`} title={platformConfig.name}>
+                      <span class={`badge badge-platform badge-platform-${badgePlatform}`} title={platformConfig.name}>
                         <span class="material-symbols-outlined" style={{ fontSize: '11px' }}>{icon}</span>
                         {platformConfig.name}
                       </span>
@@ -280,8 +327,8 @@ export function PlanTab() {
                     </div>
                   </div>
 
-                  {(draft.assembledPost || draft.caption) && (
-                    <div class="plan-item-caption">{draft.assembledPost || draft.caption}</div>
+                  {snippet && (
+                    <div class="plan-item-caption">{snippet}</div>
                   )}
 
                   {draft.images.length > 0 && (
@@ -302,21 +349,9 @@ export function PlanTab() {
                   )}
 
                   <div class="plan-item-meta">
-                    <div class="plan-date-picker">
-                      <span class="material-symbols-outlined" style={{ fontSize: '13px', color: 'var(--text3)' }}>calendar_month</span>
-                      <input
-                        type="date"
-                        class={`plan-date-input ${isOverdue ? 'overdue' : ''} ${isToday ? 'today' : ''}`}
-                        value={draft.plannedDate || ''}
-                        onChange={(e) => handleDateChange(draft, (e.target as HTMLInputElement).value)}
-                        title="Planned post date"
-                      />
-                      {isOverdue && (
-                        <span class="plan-date-flag overdue">overdue</span>
-                      )}
-                      {isToday && (
-                        <span class="plan-date-flag today">today</span>
-                      )}
+                    <div class="plan-date-rows">
+                      {slots.caption && renderDateRow(draft, 'plannedDate', draft.platform)}
+                      {slots.threads && renderDateRow(draft, 'threadsPlannedDate', 'threads')}
                     </div>
                     <div class="plan-item-date">
                       {new Date(draft.updatedAt).toLocaleDateString()}

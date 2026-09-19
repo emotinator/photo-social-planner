@@ -34,7 +34,10 @@ export interface Draft {
     timestamp: string
   }
 
+  /** Planned date for the main caption post */
   plannedDate?: string
+  /** Planned date for the Threads post, which can go out on a different day */
+  threadsPlannedDate?: string
   planOrder?: number
 
   // Template mode

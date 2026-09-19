@@ -104,6 +104,11 @@ export function GenerateTab() {
     : outputTabs[0]?.id ?? 'post'
   const showOutputTabs = outputTabs.length > 1
 
+  // While editing a saved draft, an unticked output the draft already has is left
+  // alone by the next run — say so under its checkbox.
+  const keptNote = (kept: boolean, fallback: string) =>
+    kept ? <span style={{ color: 'var(--accent)' }}>Kept from the draft — this run won't touch it</span> : fallback
+
   // Any generated content at all — an alt-text-only run still needs a way to clear
   const hasAnyResult = outputTabs.length > 0
 
@@ -219,10 +224,14 @@ export function GenerateTab() {
       // Reserve the credits block out of the Threads limit before asking for text
       const threadsBudget = calcThreadsBudget(threadsCredits.value)
 
-      // Clear previous extras so a run with a box unticked doesn't leave stale
-      // text on screen — or silently save it onto the draft
-      editAltText.value = []
-      editThreadsPost.value = ''
+      // On a fresh workspace, clear every output so a run with a box unticked
+      // doesn't leave stale text on screen — or silently save it onto a new draft.
+      // While editing a saved draft the unticked outputs are that draft's own, so a
+      // run replaces only what it was asked for: adding a Threads post must not wipe
+      // the caption already planned.
+      const keepUnrequested = !!editingDraftId.value
+      if (wantAlt || !keepUnrequested) editAltText.value = []
+      if (wantThreads || !keepUnrequested) editThreadsPost.value = ''
 
       if (!wantCaption) {
         // Extras only — no caption means no template to fill and nothing for a
@@ -231,10 +240,12 @@ export function GenerateTab() {
         const result = await timedGenerate({ model, images: resized, systemPrompt, userPrompt, platform, wantCaption: false, extraOutputs, imageCount, threadsBudget: threadsBudget.budget })
         generationResult.value = result
         applyVariantExtras(result)
-        editTitle.value = ''
-        editCaption.value = ''
-        editHashtags.value = []
-        assembledPost.value = ''
+        if (!keepUnrequested) {
+          editTitle.value = ''
+          editCaption.value = ''
+          editHashtags.value = []
+          assembledPost.value = ''
+        }
       } else if (isTemplateMode && activeTemplate) {
         // Template mode
         const llmFieldKeys = extractLLMFields(activeTemplate.body)
@@ -565,7 +576,7 @@ export function GenerateTab() {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Instagram caption</div>
             <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginTop: '3px' }}>
-              {activeTemplate ? `Template: ${activeTemplate.name}` : 'Title · caption · hashtags'}
+              {keptNote(isEditing && !wantCaption && hasResult, activeTemplate ? `Template: ${activeTemplate.name}` : 'Title · caption · hashtags')}
             </div>
           </div>
         </label>
@@ -580,7 +591,7 @@ export function GenerateTab() {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Alt text</div>
             <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginTop: '3px' }}>
-              One per image{images.length > 1 ? ` (${images.length} slides)` : ''} · accessibility + search
+              {keptNote(isEditing && !wantAltText && hasAlt, `One per image${images.length > 1 ? ` (${images.length} slides)` : ''} · accessibility + search`)}
             </div>
           </div>
         </label>
@@ -596,7 +607,7 @@ export function GenerateTab() {
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Threads post</div>
               <div style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: "'DM Mono', monospace", marginTop: '3px' }}>
-                Written natively · 300–{PLATFORMS.threads.captionMaxLength} chars, no hashtags
+                {keptNote(isEditing && !enableThreadsPost.value && hasThreads, `Written natively · 300–${PLATFORMS.threads.captionMaxLength} chars, no hashtags`)}
               </div>
             </div>
           </label>
