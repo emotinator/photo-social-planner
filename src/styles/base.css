@@ -305,9 +305,15 @@ select:focus { border-color: var(--accent); }
   display: flex; justify-content: space-between; align-items: center;
   margin-top: 8px; gap: 8px;
 }
+.plan-date-rows {
+  display: flex; flex-direction: column; gap: 4px;
+}
 .plan-date-picker {
   display: flex; align-items: center; gap: 4px;
 }
+.platform-glyph { flex-shrink: 0; }
+.platform-glyph-instagram { color: #e1306c; }
+.platform-glyph-threads { color: var(--text2); }
 .plan-date-input {
   font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text2);
   background: var(--surface); border: 1px solid var(--border); border-radius: 3px;
@@ -316,6 +322,7 @@ select:focus { border-color: var(--accent); }
 .plan-date-input::-webkit-calendar-picker-indicator {
   filter: invert(0.5); cursor: pointer; font-size: 11px;
 }
+.plan-date-input.inherited { opacity: 0.55; border-style: dashed; }
 .plan-date-input.overdue { border-color: var(--red); color: var(--red); }
 .plan-date-input.today { border-color: var(--accent); color: var(--accent); }
 .plan-date-flag {
